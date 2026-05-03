@@ -1,0 +1,27 @@
+{
+  "name": "takome-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "preview": "turbo preview",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check",
+    "format": "turbo format",
+    "dev:portal": "turbo dev --filter=@takome/portal",
+    "build:portal": "turbo build --filter=@takome/portal",
+    "preview:portal": "turbo preview --filter=@takome/portal",
+    "lint:portal": "turbo lint --filter=@takome/portal",
+    "type-check:portal": "turbo type-check --filter=@takome/portal",
+    "format:portal": "turbo format --filter=@takome/portal"
+  },
+  "devDependencies": {
+    "turbo": "^2.6.3"
+  },
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}
