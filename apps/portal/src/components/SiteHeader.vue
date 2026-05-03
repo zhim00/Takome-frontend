@@ -4,11 +4,13 @@ import { onBeforeUnmount, onMounted, shallowRef, useTemplateRef } from 'vue'
 import emailIconUrl from '@/assets/contacts/email.svg'
 import githubIconUrl from '@/assets/contacts/github.svg'
 import logoUrl from '@/assets/takome-logo.svg'
+import LoginDialog from '@/components/LoginDialog.vue'
 
 const contactEmail = 'zhim00@163.com'
 const githubUrl = 'https://github.com/zhim00/Takome-backend'
 const isContactOpen = shallowRef(false)
 const isContactPinned = shallowRef(false)
+const isLoginDialogOpen = shallowRef(false)
 const contactMenuRef = useTemplateRef<HTMLElement>('contactMenu')
 
 function openContactMenu() {
@@ -31,6 +33,10 @@ function closeContactMenuFromOutside(event: MouseEvent) {
     isContactOpen.value = false
     isContactPinned.value = false
   }
+}
+
+function openLoginDialog() {
+  isLoginDialogOpen.value = true
 }
 
 onMounted(() => {
@@ -94,7 +100,9 @@ onBeforeUnmount(() => {
       </div>
 
       <button class="site-nav-link" type="button">AI助手</button>
-      <button class="site-login-button" type="button">登录</button>
+      <button class="site-login-button" type="button" @click="openLoginDialog">登录</button>
     </nav>
   </header>
+
+  <LoginDialog v-model="isLoginDialogOpen" />
 </template>
