@@ -1,12 +1,24 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
+import { useRouter } from 'vue-router'
 import SiteHeader from '@/components/SiteHeader.vue'
 import ThumbnailSwitcher from '@/components/ThumbnailSwitcher.vue'
 import { defaultPlatform, platforms } from '@/data/platforms'
 import type { PlatformItem } from '@/types/platform'
 
+const router = useRouter()
 const activeIndex = shallowRef(0)
 const activePlatform = computed<PlatformItem>(() => platforms[activeIndex.value] ?? defaultPlatform)
+const enterDisabled = computed(() => activePlatform.value.disabled || !activePlatform.value.entryRoute)
+
+function enterPlatform(platform: PlatformItem) {
+  if (platform.disabled || !platform.entryRoute) {
+    return
+  }
+
+  const route = router.resolve(platform.entryRoute)
+  window.open(route.href, '_blank', 'noopener,noreferrer')
+}
 </script>
 
 <template>
@@ -18,7 +30,7 @@ const activePlatform = computed<PlatformItem>(() => platforms[activeIndex.value]
         <div class="platform-art-frame">
           <Transition name="art-slide" mode="out-in">
             <img
-              :key="activePlatform.title"
+              :key="activePlatform.id"
               class="platform-art-image"
               :src="activePlatform.image"
               :alt="activePlatform.title"
@@ -36,7 +48,7 @@ const activePlatform = computed<PlatformItem>(() => platforms[activeIndex.value]
 
       <section class="platform-info-section">
         <Transition name="info-slide" mode="out-in">
-          <div :key="activePlatform.title" class="platform-info">
+          <div :key="activePlatform.id" class="platform-info">
             <p class="platform-subtitle">
               {{ activePlatform.subtitle }}
             </p>
@@ -53,9 +65,15 @@ const activePlatform = computed<PlatformItem>(() => platforms[activeIndex.value]
               <span>微信公众号</span>
               <span>Bilibili</span>
             </div>
-            <button class="platform-enter-button group" type="button">
+            <button
+              class="platform-enter-button group"
+              :class="{ 'platform-enter-button-disabled': enterDisabled }"
+              type="button"
+              :disabled="enterDisabled"
+              @click="enterPlatform(activePlatform)"
+            >
               <span class="platform-enter-icon">→</span>
-              立即进入
+              {{ activePlatform.enterButtonLabel }}
             </button>
           </div>
         </Transition>

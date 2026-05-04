@@ -86,8 +86,15 @@ export default defineConfig({
       'mt-8 hidden flex-wrap gap-6 text-sm font-semibold text-slate-600 lg:justify-end',
     'platform-enter-button':
       'mt-10 inline-flex w-fit select-none items-center gap-4 rounded-[18px] bg-gradient-to-r from-sky-400 to-cyan-500 px-9 py-4 text-xl font-bold text-white caret-transparent shadow-[0_16px_30px_rgba(14,165,233,0.28)] outline-none transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_36px_rgba(14,165,233,0.38)] focus:outline-none',
+    'platform-enter-button-disabled':
+      'cursor-not-allowed bg-none bg-slate-300 text-slate-500 shadow-none hover:translate-y-0 hover:shadow-none',
     'platform-enter-icon':
       'text-3xl leading-none transition-transform duration-300 group-hover:translate-x-1',
+
+    'platform-placeholder-page':
+      'flex min-h-screen flex-col items-center justify-center bg-white px-6 text-center text-slate-800',
+    'platform-placeholder-title': 'text-4xl font-black sm:text-5xl',
+    'platform-placeholder-desc': 'mt-4 text-base text-slate-500',
 
     'thumbnail-switcher':
       'flex items-center justify-center gap-3 overflow-x-auto pb-3 pt-2 outline-none',

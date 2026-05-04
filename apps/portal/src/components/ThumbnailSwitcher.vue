@@ -1,5 +1,6 @@
 <script setup lang="ts">
 interface ThumbnailItem {
+  id: string
   title: string
   thumbnail: string
 }
@@ -18,7 +19,7 @@ const emit = defineEmits<{
   <div class="thumbnail-switcher">
     <button
       v-for="(item, index) in items"
-      :key="item.title"
+      :key="item.id"
       class="thumbnail-button"
       :class="{ 'thumbnail-button-active': activeIndex === index }"
       type="button"

@@ -10,32 +10,47 @@ import type { PlatformItem } from '@/types/platform'
 
 export const platforms: PlatformItem[] = [
   {
+    id: 'novel',
     title: '小说星港',
     subtitle: 'Novel Harbor',
     desc: '在轻盈的阅读空间里探索奇幻、恋爱、悬疑与冒险。这里为读者聚合连载故事，也为后续书架、榜单和订阅接口预留内容入口。',
     image: novelUrl,
     thumbnail: novelIcon,
+    enterButtonLabel: '立即进入',
+    entryRoute: '/novel',
+    disabled: false,
   },
   {
+    id: 'comic',
     title: '漫画回廊',
     subtitle: 'Comic Gallery',
     desc: '以分镜和色彩连接角色世界。页面保留横向切换结构，适合接入漫画频道、专题推荐、章节列表和作品详情。',
     image: comicUrl,
     thumbnail: comicIcon,
+    enterButtonLabel: '立即进入',
+    entryRoute: '/comic',
+    disabled: true,
   },
   {
+    id: 'writer',
     title: '作家专区',
     subtitle: 'Creator Studio',
     desc: '面向创作者的清爽入口，后续可扩展为投稿、草稿、收益概览和数据看板。当前仅呈现静态导航与视觉状态。',
     image: writerUrl,
     thumbnail: writerIcon,
+    enterButtonLabel: '立即进入',
+    entryRoute: '/writer',
+    disabled: true,
   },
   {
+    id: 'more',
     title: '更多平台',
     subtitle: 'Coming Soon',
     desc: '持续更新中，敬请期待更多精彩内容。',
     image: morePlatformsUrl,
     thumbnail: morePlatformsIcon,
+    enterButtonLabel: '敬请期待',
+    disabled: true,
   },
 ]
 

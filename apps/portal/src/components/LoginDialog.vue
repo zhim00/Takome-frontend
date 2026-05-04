@@ -53,11 +53,11 @@ function validateSmsLogin() {
   clearErrors()
 
   if (!phonePattern.test(smsForm.phone.trim())) {
-    errors.smsPhone = '请输入有效的中国大陆手机号'
+    errors.smsPhone = '手机号格式错误'
   }
 
   if (!codePattern.test(smsForm.code.trim())) {
-    errors.smsCode = '验证码需为 6 位数字'
+    errors.smsCode = '验证码错误'
   }
 
   return errors.smsPhone === '' && errors.smsCode === ''
@@ -71,7 +71,7 @@ function validatePasswordLogin() {
   const isEmail = emailPattern.test(account)
 
   if (!isPhone && !isEmail) {
-    errors.passwordAccount = '请输入有效的手机号或邮箱'
+    errors.passwordAccount = '账号格式错误'
   }
 
   if (passwordForm.password.length < 6 || passwordForm.password.length > 32) {
@@ -264,7 +264,7 @@ function submitPasswordLogin() {
   --login-dialog-padding-bottom: 36px;
   --login-form-width: 400px;
   --login-logo-width: 164px;
-  --login-logo-offset-x: 12px;
+  --login-logo-offset-x: 14px;
   --login-logo-margin-bottom: 34px;
   --login-close-size: 34px;
   --login-close-top: 0px;
