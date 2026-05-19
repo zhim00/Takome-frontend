@@ -15,7 +15,7 @@ const router = createRouter({
       name: 'novel',
       component: PlatformPlaceholderView,
       props: {
-        title: '小说星港',
+        title: 'Takome书屋',
       },
     },
     {
@@ -23,7 +23,7 @@ const router = createRouter({
       name: 'comic',
       component: PlatformPlaceholderView,
       props: {
-        title: '漫画回廊',
+        title: 'Takome漫画',
       },
     },
     {
