@@ -11,11 +11,17 @@
     "type-check": "turbo type-check",
     "format": "turbo format",
     "dev:portal": "turbo dev --filter=@takome/portal",
+    "dev:novel": "turbo dev --filter=@takome/novel",
     "build:portal": "turbo build --filter=@takome/portal",
+    "build:novel": "turbo build --filter=@takome/novel",
     "preview:portal": "turbo preview --filter=@takome/portal",
+    "preview:novel": "turbo preview --filter=@takome/novel",
     "lint:portal": "turbo lint --filter=@takome/portal",
+    "lint:novel": "turbo lint --filter=@takome/novel",
     "type-check:portal": "turbo type-check --filter=@takome/portal",
-    "format:portal": "turbo format --filter=@takome/portal"
+    "type-check:novel": "turbo type-check --filter=@takome/novel",
+    "format:portal": "turbo format --filter=@takome/portal",
+    "format:novel": "turbo format --filter=@takome/novel"
   },
   "devDependencies": {
     "turbo": "^2.6.3"
