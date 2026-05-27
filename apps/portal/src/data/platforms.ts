@@ -17,7 +17,7 @@ export const platforms: PlatformItem[] = [
     image: novelUrl,
     thumbnail: novelIcon,
     enterButtonLabel: '立即进入',
-    entryRoute: '/novel',
+    entryRoute: '/novel/',
     disabled: false,
   },
   {

@@ -1,23 +1,28 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
-import { useRouter } from 'vue-router'
 import SiteHeader from '@/components/SiteHeader.vue'
 import ThumbnailSwitcher from '@/components/ThumbnailSwitcher.vue'
 import { defaultPlatform, platforms } from '@/data/platforms'
 import type { PlatformItem } from '@/types/platform'
 
-const router = useRouter()
 const activeIndex = shallowRef(0)
 const activePlatform = computed<PlatformItem>(() => platforms[activeIndex.value] ?? defaultPlatform)
 const enterDisabled = computed(() => activePlatform.value.disabled || !activePlatform.value.entryRoute)
+
+function resolvePlatformUrl(platform: PlatformItem) {
+  if (platform.id === 'novel') {
+    return import.meta.env.VITE_NOVEL_URL ?? '/novel/'
+  }
+
+  return platform.entryRoute ?? '/'
+}
 
 function enterPlatform(platform: PlatformItem) {
   if (platform.disabled || !platform.entryRoute) {
     return
   }
 
-  const route = router.resolve(platform.entryRoute)
-  window.open(route.href, '_blank', 'noopener,noreferrer')
+  window.open(resolvePlatformUrl(platform), '_blank', 'noopener,noreferrer')
 }
 </script>
 

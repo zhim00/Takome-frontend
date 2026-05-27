@@ -8,6 +8,7 @@
 
     // Path mapping for cleaner imports.
     "paths": {
+      "@takome/shared-auth": ["../../packages/shared-auth/src/index.ts"],
       "@/*": ["./src/*"]
     },
 

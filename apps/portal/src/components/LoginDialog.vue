@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, shallowRef } from 'vue'
+import { createDemoAuthUser, writeSharedAuth } from '@takome/shared-auth'
 
 import logoUrl from '@/assets/takome-logo.svg'
 
@@ -86,7 +87,8 @@ function submitSmsLogin() {
     return
   }
 
-  console.info('SMS login payload is valid; request is not implemented yet.')
+  persistDemoLogin(smsForm.phone.trim())
+  closeDialog()
 }
 
 function submitPasswordLogin() {
@@ -94,7 +96,12 @@ function submitPasswordLogin() {
     return
   }
 
-  console.info('Password login payload is valid; request is not implemented yet.')
+  persistDemoLogin(passwordForm.account.trim())
+  closeDialog()
+}
+
+function persistDemoLogin(account: string) {
+  writeSharedAuth(createDemoAuthUser(account, 'Takome 门户'))
 }
 </script>
 

@@ -14,6 +14,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      '@takome/shared-auth': fileURLToPath(new URL('../../packages/shared-auth/src/index.ts', import.meta.url)),
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
