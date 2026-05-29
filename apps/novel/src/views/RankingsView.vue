@@ -15,9 +15,9 @@ const rankings = shallowRef<Record<RankingType, Book[]>>({
 })
 
 const tabs: Array<{ type: RankingType; label: string; desc: string }> = [
-  { type: 'update', label: '更新榜', desc: '按最近章节活跃度' },
+  { type: 'update', label: '更新榜', desc: '按最新章节活跃度' },
   { type: 'visit', label: '点击榜', desc: '按阅读访问热度' },
-  { type: 'newest', label: '新书榜', desc: '按新书入库排序' },
+  { type: 'newest', label: '新书榜', desc: '按新书受欢迎程度' },
 ]
 
 const visibleBooks = computed(() => rankings.value[activeType.value].slice(0, 20))
@@ -38,7 +38,6 @@ onMounted(async () => {
     <section class="page-head">
       <p class="meta-label">Rankings</p>
       <h1 class="serif">排行榜</h1>
-      <p>仅展示每个榜单前 20 本，点击榜单分类即时切换。</p>
     </section>
 
     <div class="ranking-tabs">
@@ -119,8 +118,10 @@ onMounted(async () => {
 }
 
 .ranking-list {
+  display: grid;
+  gap: 2px;
   margin-top: 24px;
-  padding: 10px 24px 24px;
+  padding: 18px;
 }
 
 @media (max-width: 720px) {

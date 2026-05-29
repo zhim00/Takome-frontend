@@ -67,7 +67,7 @@ async function loadHome() {
   todayRecommendation.value = pickRandomBook(visitRank.value)
 
   if (!todayRecommendation.value) {
-    recommendationError.value = '暂无可用于推荐的作品'
+    recommendationError.value = '书被老鼠偷走了，稍后再试试吧~'
   }
 
   loading.value = false
@@ -146,7 +146,7 @@ onMounted(() => {
           <div v-if="hotBooks.length" class="hot-grid">
             <BookCard v-for="book in hotBooks" :key="book.id" :book="book" />
           </div>
-          <p v-else class="section-empty">暂无热门推荐数据。</p>
+          <p v-else class="section-empty">暂无热门推荐数据</p>
         </div>
 
         <aside class="news-panel">
@@ -169,7 +169,7 @@ onMounted(() => {
               <small>{{ item.sourceName }} · {{ formatDateLabel(item.updatedAt) }}</small>
             </RouterLink>
           </div>
-          <p v-else class="section-empty">暂无资讯。</p>
+          <p v-else class="section-empty">暂无资讯</p>
         </aside>
       </div>
     </section>
@@ -196,7 +196,7 @@ onMounted(() => {
             <time>{{ formatDateLabel(book.updatedAt) }}</time>
           </RouterLink>
         </div>
-        <p v-else class="section-empty">暂无更新数据。</p>
+        <p v-else class="section-empty">暂无更新数据</p>
       </div>
 
       <aside class="update-rank-panel">

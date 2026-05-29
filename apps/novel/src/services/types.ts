@@ -28,6 +28,7 @@ export interface Book {
   firstChapterId?: string
   lastChapterId?: string
   lastChapterName: string
+  lastChapterUpdateTime?: string
   updatedAt: string
   source: 'api' | 'mock'
 }
@@ -53,6 +54,7 @@ export interface ChapterContent {
 export interface Category {
   id: string
   name: string
+  workDirection?: 0 | 1
 }
 
 export interface NewsItem {
@@ -122,10 +124,16 @@ export interface FeedbackItem {
 
 export interface SearchOptions {
   keyword?: string
+  workDirection?: string
   categoryId?: string
+  isVip?: string
   bookStatus?: string
+  wordCountMin?: number
+  wordCountMax?: number
+  updateTimeMin?: string
   pageNum?: number
   pageSize?: number
   sort?: string
   order?: string
+  hydrateDetails?: boolean
 }

@@ -80,6 +80,7 @@ function mapBook(raw: ApiBook, source: Book['source'] = 'api'): Book {
     firstChapterId: toText(raw.firstChapterId) || undefined,
     lastChapterId: toText(raw.lastChapterId) || undefined,
     lastChapterName: stripHtml(raw.lastChapterName, '暂无最新章节'),
+    lastChapterUpdateTime: toText(raw.lastChapterUpdateTime) || undefined,
     updatedAt: toText(raw.updateTime ?? raw.lastChapterUpdateTime, '最近更新'),
     source,
   }
@@ -167,15 +168,38 @@ export async function searchBooks(options: SearchOptions = {}): Promise<PageResu
   const data = await apiRequest<PageResult<ApiBook>>('/api/front/search/books', {
     query: {
       keyword: options.keyword,
+      workDirection: options.workDirection,
       categoryId: options.categoryId,
+      isVip: options.isVip,
       bookStatus: options.bookStatus,
+      wordCountMin: options.wordCountMin,
+      wordCountMax: options.wordCountMax,
+      updateTimeMin: options.updateTimeMin,
       pageNum,
       pageSize,
       sort: options.sort,
       order: options.order,
     },
   })
-  const list = (data?.list ?? []).map((book) => mapBook(book))
+  const sourceList = data?.list ?? []
+  const list = options.hydrateDetails
+    ? await Promise.all(
+        sourceList.map(async (book) => {
+          const bookId = toText(book.id ?? book.bookId)
+
+          if (!bookId) {
+            return mapBook(book)
+          }
+
+          try {
+            const detail = await apiRequest<ApiBook>(`/api/front/book/${bookId}`)
+            return mapBook(detail ?? book)
+          } catch {
+            return mapBook(book)
+          }
+        }),
+      )
+    : sourceList.map((book) => mapBook(book))
 
   return {
     pageNum: toNumber(data?.pageNum, pageNum),
@@ -192,10 +216,18 @@ export async function fetchCategories(): Promise<Category[]> {
     apiRequest<Category[]>('/api/front/book/category/list', { query: { workDirection: 1 } }),
   ])
 
-  return [...(male ?? []), ...(female ?? [])].map((category) => ({
-    id: toText(category.id),
-    name: stripHtml(category.name, '未分类'),
-  }))
+  return [
+    ...(male ?? []).map((category) => ({
+      id: toText(category.id),
+      name: stripHtml(category.name, '未分类'),
+      workDirection: 0 as const,
+    })),
+    ...(female ?? []).map((category) => ({
+      id: toText(category.id),
+      name: stripHtml(category.name, '未分类'),
+      workDirection: 1 as const,
+    })),
+  ]
 }
 
 export async function fetchBook(bookId: string): Promise<Book> {
