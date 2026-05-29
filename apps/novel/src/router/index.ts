@@ -3,6 +3,7 @@ import HomeView from '@/views/HomeView.vue'
 import LibraryView from '@/views/LibraryView.vue'
 import RankingsView from '@/views/RankingsView.vue'
 import BookDetailView from '@/views/BookDetailView.vue'
+import NewsDetailView from '@/views/NewsDetailView.vue'
 import ReaderView from '@/views/ReaderView.vue'
 import BookshelfView from '@/views/BookshelfView.vue'
 import ProfileView from '@/views/ProfileView.vue'
@@ -30,6 +31,11 @@ const router = createRouter({
       path: '/books/:id',
       name: 'book-detail',
       component: BookDetailView,
+    },
+    {
+      path: '/news/:id',
+      name: 'news-detail',
+      component: NewsDetailView,
     },
     {
       path: '/reader/:chapterId',

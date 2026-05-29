@@ -1,12 +1,5 @@
 import { apiRequest } from './apiClient'
-import {
-  mockBooks,
-  mockCategories,
-  mockNews,
-  fallbackBook,
-  createMockChapters,
-  createMockContent,
-} from './mockData'
+import { mockBooks, fallbackBook, createMockChapters, createMockContent } from './mockData'
 import { compactText, resolveAssetUrl, stripHtml, toNumber, toText } from './format'
 import type {
   Book,
@@ -21,6 +14,8 @@ import type {
 
 interface ApiBook {
   id?: string | number
+  bookId?: string | number
+  type?: string | number | null
   categoryId?: string | number
   categoryName?: string
   picUrl?: string
@@ -67,7 +62,7 @@ interface ApiCommentInfo {
 }
 
 function mapBook(raw: ApiBook, source: Book['source'] = 'api'): Book {
-  const id = toText(raw.id, `mock-${Math.random()}`)
+  const id = toText(raw.id ?? raw.bookId, `api-book-${Math.random().toString(36).slice(2)}`)
   const title = stripHtml(raw.bookName, '未命名作品')
 
   return {
@@ -103,9 +98,9 @@ function mapChapter(raw: ApiChapter, bookId: string, order: number): Chapter {
   }
 }
 
-function mapNews(raw: ApiNews, index: number): NewsItem {
+function mapNews(raw: ApiNews, index: number, fallbackId = `news-${index}`): NewsItem {
   return {
-    id: toText(raw.id, `news-${index}`),
+    id: toText(raw.id, fallbackId),
     title: stripHtml(raw.title, '未命名资讯'),
     category: stripHtml(raw.categoryName, '资讯'),
     sourceName: stripHtml(raw.sourceName, 'Takome'),
@@ -115,104 +110,92 @@ function mapNews(raw: ApiNews, index: number): NewsItem {
   }
 }
 
-function fallbackBooks(pageNum = 1, pageSize = 10): PageResult<Book> {
-  const start = (pageNum - 1) * pageSize
-  const list = mockBooks.slice(start, start + pageSize)
-
-  return {
-    pageNum,
-    pageSize,
-    total: mockBooks.length,
-    list,
-    pages: Math.ceil(mockBooks.length / pageSize),
-  }
-}
-
 export async function fetchUpdateRank() {
-  try {
-    const data = await apiRequest<ApiBook[]>('/api/front/book/update_rank')
-    const books = (data ?? []).map((book) => mapBook(book))
-    return books.length ? books : mockBooks.slice(0, 20)
-  } catch {
-    return mockBooks.slice(0, 20)
-  }
+  const data = await apiRequest<ApiBook[]>('/api/front/book/update_rank')
+  return (data ?? []).map((book) => mapBook(book))
 }
 
 export async function fetchVisitRank() {
-  try {
-    const data = await apiRequest<ApiBook[]>('/api/front/book/visit_rank')
-    const books = (data ?? []).map((book) => mapBook(book))
-    return books.length ? books : mockBooks.slice(0, 20)
-  } catch {
-    return mockBooks.slice(0, 20)
-  }
+  const data = await apiRequest<ApiBook[]>('/api/front/book/visit_rank')
+  return (data ?? []).map((book) => mapBook(book))
 }
 
 export async function fetchNewestRank() {
-  try {
-    const data = await apiRequest<ApiBook[]>('/api/front/book/newest_rank')
-    const books = (data ?? []).map((book) => mapBook(book))
-    return books.length ? books : mockBooks.slice(0, 20)
-  } catch {
-    return mockBooks.slice(0, 20)
-  }
+  const data = await apiRequest<ApiBook[]>('/api/front/book/newest_rank')
+  return (data ?? []).map((book) => mapBook(book))
+}
+
+export async function fetchHomeBooks(type: number, limit?: number) {
+  const data = await apiRequest<ApiBook[]>('/api/front/home/books')
+
+  const books = (data ?? [])
+    .filter((book) => String(book.type) === String(type))
+    .slice(0, limit)
+
+  return Promise.all(
+    books.map(async (book) => {
+      const bookId = toText(book.bookId ?? book.id)
+
+      if (!bookId) {
+        return mapBook(book)
+      }
+
+      try {
+        const detail = await apiRequest<ApiBook>(`/api/front/book/${bookId}`)
+        return mapBook(detail ?? book)
+      } catch {
+        return mapBook(book)
+      }
+    }),
+  )
 }
 
 export async function fetchNews() {
-  try {
-    const data = await apiRequest<ApiNews[]>('/api/front/news/latest_list')
-    const news = (data ?? []).map(mapNews)
-    return news.length >= 6 ? news.slice(0, 6) : [...news, ...mockNews].slice(0, 6)
-  } catch {
-    return mockNews
-  }
+  const data = await apiRequest<ApiNews[]>('/api/front/news/latest_list')
+  return (data ?? []).map((item, index) => mapNews(item, index))
+}
+
+export async function fetchNewsDetail(newsId: string): Promise<NewsItem> {
+  const data = await apiRequest<ApiNews>(`/api/front/news/${newsId}`)
+  return mapNews(data ?? { id: newsId }, 0, newsId)
 }
 
 export async function searchBooks(options: SearchOptions = {}): Promise<PageResult<Book>> {
   const pageNum = options.pageNum ?? 1
   const pageSize = options.pageSize ?? 10
 
-  try {
-    const data = await apiRequest<PageResult<ApiBook>>('/api/front/search/books', {
-      query: {
-        keyword: options.keyword,
-        categoryId: options.categoryId,
-        bookStatus: options.bookStatus,
-        pageNum,
-        pageSize,
-        sort: options.sort,
-        order: options.order,
-      },
-    })
-    const list = (data?.list ?? []).map((book) => mapBook(book))
+  const data = await apiRequest<PageResult<ApiBook>>('/api/front/search/books', {
+    query: {
+      keyword: options.keyword,
+      categoryId: options.categoryId,
+      bookStatus: options.bookStatus,
+      pageNum,
+      pageSize,
+      sort: options.sort,
+      order: options.order,
+    },
+  })
+  const list = (data?.list ?? []).map((book) => mapBook(book))
 
-    return {
-      pageNum: toNumber(data?.pageNum, pageNum),
-      pageSize: toNumber(data?.pageSize, pageSize),
-      total: toNumber(data?.total, list.length),
-      list,
-      pages: toNumber(data?.pages, 1),
-    }
-  } catch {
-    return fallbackBooks(pageNum, pageSize)
+  return {
+    pageNum: toNumber(data?.pageNum, pageNum),
+    pageSize: toNumber(data?.pageSize, pageSize),
+    total: toNumber(data?.total, list.length),
+    list,
+    pages: toNumber(data?.pages, 1),
   }
 }
 
 export async function fetchCategories(): Promise<Category[]> {
-  try {
-    const [male, female] = await Promise.all([
-      apiRequest<Category[]>('/api/front/book/category/list', { query: { workDirection: 0 } }),
-      apiRequest<Category[]>('/api/front/book/category/list', { query: { workDirection: 1 } }),
-    ])
-    const categories = [...(male ?? []), ...(female ?? [])].map((category) => ({
-      id: toText(category.id),
-      name: stripHtml(category.name, '未分类'),
-    }))
+  const [male, female] = await Promise.all([
+    apiRequest<Category[]>('/api/front/book/category/list', { query: { workDirection: 0 } }),
+    apiRequest<Category[]>('/api/front/book/category/list', { query: { workDirection: 1 } }),
+  ])
 
-    return categories.length ? categories : mockCategories
-  } catch {
-    return mockCategories
-  }
+  return [...(male ?? []), ...(female ?? [])].map((category) => ({
+    id: toText(category.id),
+    name: stripHtml(category.name, '未分类'),
+  }))
 }
 
 export async function fetchBook(bookId: string): Promise<Book> {
@@ -252,7 +235,7 @@ export async function fetchChapterContent(chapterId: string): Promise<ChapterCon
       return { book, chapter, content, source: 'api' }
     }
   } catch {
-    // fall through to mock content
+    // Keep the reader route usable in development when chapter content is missing.
   }
 
   const book = mockBooks[0] ?? fallbackBook

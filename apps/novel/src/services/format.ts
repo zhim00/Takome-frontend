@@ -32,14 +32,16 @@ export function stripHtml(value: unknown, fallback = '暂无简介') {
 
   return text
     .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
     .replace(/&nbsp;/gi, ' ')
     .replace(/<[^>]*>/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/[ \t\r\f\v]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
     .trim()
 }
 
 export function compactText(value: unknown, maxLength = 112, fallback = '暂无简介') {
-  const text = stripHtml(value, fallback)
+  const text = stripHtml(value, fallback).replace(/\s+/g, ' ')
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
 }
 
