@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 
 import ChapterDrawer from '@/components/ChapterDrawer.vue'
+import ReaderChapterInfo from '@/components/reader/ReaderChapterInfo.vue'
+import ReaderChapterNav from '@/components/reader/ReaderChapterNav.vue'
+import ReaderHeader from '@/components/reader/ReaderHeader.vue'
+import ReaderSideMenu from '@/components/reader/ReaderSideMenu.vue'
 import { useLibraryState } from '@/composables/useLibraryState'
 import { getReaderSettings, setReaderSettings } from '@/services/storage'
-import { fetchChapterContent, fetchChapters } from '@/services/novelApi'
+import {
+  fetchBookshelfStatus,
+  fetchChapterContent,
+  fetchChapters,
+  fetchNextChapterId,
+  fetchPreviousChapterId,
+} from '@/services/novelApi'
 import type { Chapter, ChapterContent } from '@/services/types'
 
 const route = useRoute()
@@ -14,7 +24,14 @@ const { isInBookshelf, recordReading, toggleBookshelf } = useLibraryState()
 const content = shallowRef<ChapterContent>()
 const chapters = shallowRef<Chapter[]>([])
 const isCatalogOpen = shallowRef(false)
-const isTopVisible = shallowRef(true)
+const loading = shallowRef(false)
+const errorMessage = shallowRef('')
+const previousChapterId = shallowRef<string>()
+const nextChapterId = shallowRef<string>()
+const backendBookshelfStatus = shallowRef<boolean>()
+const bookshelfOverride = shallowRef<boolean>()
+const bookshelfLoading = shallowRef(false)
+const isHeaderVisible = shallowRef(true)
 const lastScrollY = shallowRef(0)
 const settings = shallowRef(getReaderSettings())
 const fontSizes = [16, 20, 24, 28, 32]
@@ -22,7 +39,14 @@ const fontSizes = [16, 20, 24, 28, 32]
 const chapterId = computed(() => String(route.params.chapterId))
 const book = computed(() => content.value?.book)
 const chapter = computed(() => content.value?.chapter)
-const isSaved = computed(() => (book.value ? isInBookshelf(book.value.id) : false))
+const paragraphs = computed(() => content.value?.content.split('\n').filter((item) => item.trim()) ?? [])
+const isSaved = computed(() => {
+  if (!book.value) {
+    return false
+  }
+
+  return bookshelfOverride.value ?? backendBookshelfStatus.value ?? isInBookshelf(book.value.id)
+})
 const readerClass = computed(() => ({
   'reader-night': settings.value.night,
 }))
@@ -31,10 +55,51 @@ const contentStyle = computed(() => ({
 }))
 
 async function loadReader() {
-  const chapterContent = await fetchChapterContent(chapterId.value)
-  content.value = chapterContent
-  chapters.value = await fetchChapters(chapterContent.book.id)
-  recordReading(chapterContent.book, chapterContent.chapter.id, chapterContent.chapter.title)
+  const activeChapterId = chapterId.value
+
+  loading.value = true
+  errorMessage.value = ''
+  content.value = undefined
+  previousChapterId.value = undefined
+  nextChapterId.value = undefined
+  backendBookshelfStatus.value = undefined
+  bookshelfOverride.value = undefined
+
+  try {
+    const chapterContent = await fetchChapterContent(activeChapterId)
+
+    if (activeChapterId !== chapterId.value) {
+      return
+    }
+
+    content.value = chapterContent
+    window.scrollTo({ top: 0 })
+    recordReading(chapterContent.book, chapterContent.chapter.id, chapterContent.chapter.title)
+
+    const [chapterData, previousId, nextId, bookshelfStatus] = await Promise.all([
+      fetchChapters(chapterContent.book.id, { fallback: false }),
+      fetchPreviousChapterId(activeChapterId),
+      fetchNextChapterId(activeChapterId),
+      fetchBookshelfStatus(chapterContent.book.id).catch(() => undefined),
+    ])
+
+    if (activeChapterId !== chapterId.value) {
+      return
+    }
+
+    chapters.value = chapterData.chapters
+    previousChapterId.value = previousId
+    nextChapterId.value = nextId
+    backendBookshelfStatus.value = bookshelfStatus
+  } catch (error) {
+    if (activeChapterId === chapterId.value) {
+      errorMessage.value = error instanceof Error ? error.message : '章节内容加载失败'
+    }
+  } finally {
+    if (activeChapterId === chapterId.value) {
+      loading.value = false
+    }
+  }
 }
 
 function toggleNight() {
@@ -47,20 +112,29 @@ function setFontSize(fontSize: number) {
   setReaderSettings(settings.value)
 }
 
-function handleScroll() {
-  const nextY = window.scrollY
-  isTopVisible.value = nextY < 24 || nextY < lastScrollY.value
-  lastScrollY.value = nextY
-}
-
 function preventCopy(event: ClipboardEvent) {
   event.preventDefault()
 }
 
+function handleScroll() {
+  const nextY = window.scrollY
+  isHeaderVisible.value = nextY < 28 || nextY < lastScrollY.value
+  lastScrollY.value = nextY
+}
+
 function handleBookshelf() {
-  if (book.value) {
+  if (!book.value || isSaved.value) {
+    return
+  }
+
+  bookshelfLoading.value = true
+
+  if (!isInBookshelf(book.value.id)) {
     toggleBookshelf(book.value.id)
   }
+
+  bookshelfOverride.value = true
+  bookshelfLoading.value = false
 }
 
 watch(chapterId, () => {
@@ -81,51 +155,41 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="reader-page" :class="readerClass">
-    <div class="reader-progress" />
+    <ReaderHeader :book="book" :visible="isHeaderVisible" />
 
-    <header class="reader-topbar" :class="{ 'reader-topbar-hidden': !isTopVisible }">
-      <RouterLink v-if="book" class="reader-book-title serif" :to="{ name: 'book-detail', params: { id: book.id } }">
-        {{ book.title }}
-      </RouterLink>
-      <span v-else class="reader-book-title serif">Takome 书屋</span>
+    <section class="reader-shell">
+      <ReaderChapterInfo v-if="chapter" :chapter="chapter" />
 
-      <div class="reader-actions">
-        <button class="reader-button" type="button" @click="isCatalogOpen = true">目录</button>
-        <button class="reader-button" type="button" @click="toggleNight">
-          {{ settings.night ? '☀ 日间' : '☾ 夜间' }}
-        </button>
-        <button class="reader-button" type="button" @click="handleBookshelf">
-          {{ isSaved ? '移除书架' : '加入书架' }}
-        </button>
-      </div>
-    </header>
+      <article v-if="content" class="reader-article" :style="contentStyle">
+        <div class="reader-content" @copy.prevent>
+          <p v-for="(paragraph, index) in paragraphs" :key="`${chapterId}-${index}`">
+            {{ paragraph }}
+          </p>
+        </div>
 
-    <article v-if="content" class="reading-container reader-article" :style="contentStyle">
-      <p class="meta-label">{{ content.book.categoryName }}</p>
-      <h1 class="serif">{{ content.chapter.title }}</h1>
-      <div class="reader-content" @copy.prevent>
-        <p v-for="(paragraph, index) in content.content.split('\n')" :key="`${chapterId}-${index}`">
-          {{ paragraph || ' ' }}
-        </p>
-      </div>
-    </article>
+        <ReaderChapterNav
+          :previous-chapter-id="previousChapterId"
+          :next-chapter-id="nextChapterId"
+        />
+      </article>
 
-    <section v-else class="reading-container reader-loading">
-      <p class="serif">正在取回章节</p>
+      <section v-else class="reader-loading">
+        <p class="loading-title">{{ loading ? '正在取回章节' : '章节暂时无法打开' }}</p>
+        <p v-if="errorMessage" class="loading-message">{{ errorMessage }}</p>
+      </section>
     </section>
 
-    <div class="reader-toolbar">
-      <button
-        v-for="fontSize in fontSizes"
-        :key="fontSize"
-        class="font-button"
-        :class="{ 'font-button-active': settings.fontSize === fontSize }"
-        type="button"
-        @click="setFontSize(fontSize)"
-      >
-        {{ fontSize }}
-      </button>
-    </div>
+    <ReaderSideMenu
+      :font-size="settings.fontSize"
+      :font-sizes="fontSizes"
+      :night="settings.night"
+      :is-saved="isSaved"
+      :bookshelf-loading="bookshelfLoading"
+      @bookshelf="handleBookshelf"
+      @catalog="isCatalogOpen = true"
+      @toggle-night="toggleNight"
+      @set-font-size="setFontSize"
+    />
 
     <ChapterDrawer
       :open="isCatalogOpen"
@@ -139,161 +203,97 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .reader-page {
+  --reader-bg: #dedede;
+  --reader-surface: #f7f7f7;
+  --reader-control: #f8f8f8;
+  --reader-control-hover: #ffffff;
+  --reader-track: #eeeeee;
+  --reader-dot: #c9c9c9;
+  --reader-button-muted: #e7e7e7;
+  --reader-line: #dedede;
+  --reader-ink: #18202a;
+  --reader-ink-strong: #071322;
+  --reader-muted: #858d97;
+  --reader-accent: #ff6425;
   min-height: 100vh;
-  padding-bottom: 96px;
-  background: #f5f0e8;
-  color: #22211f;
+  background: var(--reader-bg);
+  color: var(--reader-ink);
   transition:
     background 180ms ease,
     color 180ms ease;
 }
 
 .reader-night {
-  background: #161817;
-  color: #e8e2d6;
+  --reader-bg: #202322;
+  --reader-surface: #171a19;
+  --reader-control: #2a2d2c;
+  --reader-control-hover: #333735;
+  --reader-track: #242827;
+  --reader-dot: #636966;
+  --reader-button-muted: #2c302f;
+  --reader-line: #303533;
+  --reader-ink: #e6e1d8;
+  --reader-ink-strong: #f5efe5;
+  --reader-muted: #a9afa9;
 }
 
-.reader-progress {
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 70;
-  width: 100%;
-  height: 4px;
-  background: var(--color-secondary);
-}
-
-.reader-topbar {
-  position: fixed;
-  top: 4px;
-  left: 0;
-  right: 0;
-  z-index: 65;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 62px;
-  padding: 0 clamp(18px, 4vw, 44px);
-  border-bottom: 1px solid rgba(110, 122, 109, 0.18);
-  background: rgba(251, 249, 248, 0.86);
-  backdrop-filter: blur(14px);
-  transition: transform 180ms ease;
-}
-
-.reader-night .reader-topbar {
-  background: rgba(22, 24, 23, 0.9);
-}
-
-.reader-topbar-hidden {
-  transform: translateY(-78px);
-}
-
-.reader-book-title {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 22px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reader-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.reader-button,
-.font-button {
-  min-height: 36px;
-  border: 1px solid rgba(110, 122, 109, 0.34);
-  border-radius: 4px;
-  padding: 0 12px;
-  background: rgba(255, 255, 255, 0.72);
-  color: inherit;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.reader-night .reader-button,
-.reader-night .font-button {
-  background: rgba(255, 255, 255, 0.08);
+.reader-shell {
+  width: min(100%, 900px);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding-top: 72px;
+  background: var(--reader-surface);
 }
 
 .reader-article {
-  padding-top: 132px;
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 10px 24px 0;
   user-select: none;
 }
 
-.reader-article h1 {
-  margin: 8px 0 42px;
-  font-size: clamp(36px, 5vw, 56px);
-  font-weight: 600;
-  line-height: 1.14;
-}
-
 .reader-content {
-  line-height: 1.9;
+  color: var(--reader-ink-strong);
+  line-height: 2.02;
   letter-spacing: 0;
 }
 
 .reader-content p {
-  min-height: 1.9em;
-  margin: 0 0 1.15em;
+  min-height: 2em;
+  margin: 0 0 1.05em;
+  text-indent: 2em;
 }
 
 .reader-loading {
-  min-height: 70vh;
   display: grid;
-  place-items: center;
-  padding-top: 120px;
+  min-height: 500px;
+  align-content: center;
+  justify-items: center;
+  padding: 60px 28px;
+  color: var(--reader-muted);
 }
 
-.reader-loading p {
-  font-size: 32px;
+.loading-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
 }
 
-.reader-toolbar {
-  position: fixed;
-  right: clamp(14px, 4vw, 34px);
-  bottom: 24px;
-  z-index: 60;
-  display: flex;
-  gap: 6px;
-  padding: 8px;
-  border: 1px solid rgba(110, 122, 109, 0.18);
-  border-radius: 8px;
-  background: rgba(251, 249, 248, 0.86);
-  box-shadow: var(--shadow-paper);
-  backdrop-filter: blur(14px);
+.loading-message {
+  max-width: 520px;
+  margin: 14px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: center;
 }
 
-.reader-night .reader-toolbar {
-  background: rgba(22, 24, 23, 0.88);
-}
-
-.font-button {
-  width: 42px;
-  padding: 0;
-}
-
-.font-button-active {
-  border-color: var(--color-primary);
-  color: var(--color-primary-bright);
-}
-
-@media (max-width: 680px) {
-  .reader-topbar {
-    align-items: flex-start;
-    flex-direction: column;
-    padding-top: 10px;
-    padding-bottom: 10px;
+@media (max-width: 980px) {
+  .reader-shell {
+    width: 100%;
   }
 
   .reader-article {
-    padding-top: 158px;
+    padding-top: 4px;
   }
 }
 </style>

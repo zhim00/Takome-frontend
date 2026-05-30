@@ -17,6 +17,23 @@ interface LoginResponse {
   token?: string
 }
 
+interface RegisterPayload {
+  username: string
+  password: string
+  velCode: string
+  sessionId: string
+}
+
+interface RegisterResponse {
+  uid?: string | number
+  token?: string
+}
+
+interface ImgVerifyCodeResponse {
+  sessionId?: string
+  img?: string
+}
+
 const currentUser = shallowRef<AuthUser | null>(getAuthUser())
 const authError = shallowRef('')
 const isLoggingIn = shallowRef(false)
@@ -36,6 +53,39 @@ function createMockUser(payload: LoginPayload): AuthUser {
 export function useAuth() {
   const isAuthenticated = computed(() => currentUser.value !== null)
 
+  function createApiUser(payload: {
+    uid?: string | number
+    username: string
+    token: string
+    nickName?: string
+  }): AuthUser {
+    const savedProfile = getProfileDraft()
+
+    return {
+      uid: String(payload.uid ?? payload.username),
+      token: payload.token,
+      nickName: payload.nickName ?? savedProfile.nickName ?? `读者 ${payload.username.slice(-4)}`,
+      avatar: savedProfile.avatar,
+      sex: savedProfile.sex,
+      signature: savedProfile.signature,
+      source: 'api',
+    }
+  }
+
+  async function fetchImgVerifyCode() {
+    authError.value = ''
+    const data = await apiRequest<ImgVerifyCodeResponse>('/api/front/resource/img_verify_code')
+
+    if (!data?.sessionId || !data.img) {
+      throw new Error('图形验证码响应缺少必要字段')
+    }
+
+    return {
+      sessionId: data.sessionId,
+      img: data.img,
+    }
+  }
+
   async function login(payload: LoginPayload) {
     isLoggingIn.value = true
     authError.value = ''
@@ -50,16 +100,12 @@ export function useAuth() {
         throw new Error('登录响应缺少 token')
       }
 
-      const savedProfile = getProfileDraft()
-      const user: AuthUser = {
-        uid: String(data.uid ?? payload.username),
+      const user = createApiUser({
+        uid: data.uid,
+        username: payload.username,
         token: data.token,
-        nickName: data.nickName ?? savedProfile.nickName ?? `读者 ${payload.username.slice(-4)}`,
-        avatar: savedProfile.avatar,
-        sex: savedProfile.sex,
-        signature: savedProfile.signature,
-        source: 'api',
-      }
+        nickName: data.nickName,
+      })
 
       persistUser(user)
       return { ok: true, user, fallback: false }
@@ -68,6 +114,36 @@ export function useAuth() {
       persistUser(user)
       authError.value = error instanceof Error ? error.message : '后端登录失败，已启用演示登录'
       return { ok: true, user, fallback: true }
+    } finally {
+      isLoggingIn.value = false
+    }
+  }
+
+  async function register(payload: RegisterPayload) {
+    isLoggingIn.value = true
+    authError.value = ''
+
+    try {
+      const data = await apiRequest<RegisterResponse>('/api/front/user/register', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+
+      if (!data?.token) {
+        throw new Error('注册响应缺少 token')
+      }
+
+      const user = createApiUser({
+        uid: data.uid,
+        username: payload.username,
+        token: data.token,
+      })
+
+      persistUser(user)
+      return { ok: true, user }
+    } catch (error) {
+      authError.value = error instanceof Error ? error.message : '注册失败'
+      throw error
     } finally {
       isLoggingIn.value = false
     }
@@ -121,7 +197,9 @@ export function useAuth() {
     isAuthenticated,
     authError: readonly(authError),
     isLoggingIn: readonly(isLoggingIn),
+    fetchImgVerifyCode,
     login,
+    register,
     logout,
     updateProfile,
     updateAvatar,

@@ -102,6 +102,7 @@ const orderedChapters = computed(() => [...props.chapters].sort((a, b) => a.orde
   height: calc(100% - 106px);
   overflow: auto;
   padding: 12px;
+  padding-bottom: 50px;
 }
 
 .chapter-link {

@@ -44,6 +44,11 @@ export interface Chapter {
   source: 'api' | 'mock'
 }
 
+export interface ChapterListResult {
+  total: number
+  chapters: Chapter[]
+}
+
 export interface ChapterContent {
   book: Book
   chapter: Chapter
@@ -84,6 +89,11 @@ export interface BookComment {
   createdAt: string
   replies: CommentReply[]
   source: 'api' | 'mock'
+}
+
+export interface BookCommentResult {
+  total: number
+  comments: BookComment[]
 }
 
 import type { SharedAuthUser } from '@takome/shared-auth'
