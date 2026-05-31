@@ -209,7 +209,7 @@ watch(
 </script>
 
 <template>
-  <section class="comment-panel surface-panel">
+  <section id="comments" class="comment-panel surface-panel">
     <div class="comment-head">
       <div>
         <p class="meta-label">Comments</p>
@@ -266,7 +266,7 @@ watch(
 
     <div v-else class="empty-state">
       <p class="serif">还没有评论</p>
-      <span>登录后可以留下第一条书评。</span>
+      <span v-if="!isAuthenticated">登录后可以留下第一条书评。</span>
     </div>
 
     <Teleport to="body">

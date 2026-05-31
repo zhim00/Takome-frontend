@@ -100,12 +100,22 @@ import type { SharedAuthUser } from '@takome/shared-auth'
 
 export type AuthUser = SharedAuthUser
 
+export type UserSex = 'unknown' | 'male' | 'female'
+
+export interface UserProfileInfo {
+  nickName: string
+  avatar: string
+  avatarPath: string
+  sex: UserSex
+}
+
 export interface LegacyAuthUser {
   uid: string
   token: string
   nickName: string
   avatar?: string
-  sex?: 'unknown' | 'male' | 'female'
+  avatarPath?: string
+  sex?: UserSex
   signature?: string
   source: 'api' | 'mock'
 }
@@ -115,7 +125,35 @@ export interface BookshelfEntry {
   addedAt: string
 }
 
+export interface UserBookshelfEntry {
+  id: string
+  bookId: string
+  chapterId?: string
+  chapterNum?: number
+  chapterName?: string
+  chapterTotal: number
+  addedAt: string
+  updatedAt: string
+}
+
+export interface BookshelfBookItem {
+  entry: UserBookshelfEntry
+  book: Book
+  continueChapterId?: string
+  progressText: string
+}
+
 export interface ReadingRecord {
+  bookId: string
+  chapterId: string
+  bookTitle: string
+  chapterTitle: string
+  cover: string
+  updatedAt: string
+}
+
+export interface UserReadingHistoryItem {
+  id: string
   bookId: string
   chapterId: string
   bookTitle: string
@@ -128,8 +166,26 @@ export interface FeedbackItem {
   id: string
   content: string
   createdAt: string
+  updatedAt?: string
   reply?: string
   source: 'api' | 'mock'
+}
+
+export interface UserCommentItem {
+  id: string
+  commentId: string
+  bookId: string
+  bookTitle: string
+  bookCover: string
+  content: string
+  createdAt: string
+}
+
+export interface UserFeedbackItem {
+  id: string
+  content: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface SearchOptions {

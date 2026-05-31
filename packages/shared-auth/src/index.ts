@@ -3,6 +3,7 @@ export interface SharedAuthUser {
   token: string
   nickName: string
   avatar?: string
+  avatarPath?: string
   sex?: 'unknown' | 'male' | 'female'
   signature?: string
   source: 'api' | 'mock'

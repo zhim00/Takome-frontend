@@ -2,6 +2,8 @@ import { readSharedAuth, writeSharedAuth } from '@takome/shared-auth'
 import type { AuthUser, BookComment, BookshelfEntry, FeedbackItem, ReadingRecord } from './types'
 
 const STORAGE_PREFIX = 'takome:novel:'
+const PROFILE_SIGNATURE_KEY = `${STORAGE_PREFIX}profile-signature`
+export const AUTH_EXPIRED_EVENT = 'takome:auth-expired'
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -22,6 +24,14 @@ export function getAuthUser() {
 
 export function setAuthUser(user: AuthUser | null) {
   writeSharedAuth(user)
+}
+
+export function clearExpiredAuth() {
+  setAuthUser(null)
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+  }
 }
 
 export function getBookshelf() {
@@ -62,6 +72,31 @@ export function getProfileDraft() {
 
 export function setProfileDraft(profile: Partial<AuthUser>) {
   writeJson(`${STORAGE_PREFIX}profile`, profile)
+}
+
+export function getProfileSignature(userId?: string) {
+  if (!userId) {
+    return ''
+  }
+
+  try {
+    return sessionStorage.getItem(`${PROFILE_SIGNATURE_KEY}:${userId}`) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setProfileSignature(userId: string, signature: string) {
+  try {
+    if (signature) {
+      sessionStorage.setItem(`${PROFILE_SIGNATURE_KEY}:${userId}`, signature)
+      return
+    }
+
+    sessionStorage.removeItem(`${PROFILE_SIGNATURE_KEY}:${userId}`)
+  } catch {
+    // sessionStorage may be unavailable in some embedded contexts.
+  }
 }
 
 export function getReaderSettings() {

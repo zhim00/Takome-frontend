@@ -621,7 +621,7 @@ onMounted(async () => {
   display: flex;
   justify-content: center;
   gap: 8px;
-  padding-top: 34px;
+  padding-top: 64px;
 }
 
 .pagination button {

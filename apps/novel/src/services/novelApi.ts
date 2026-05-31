@@ -5,6 +5,7 @@ import type {
   Book,
   BookComment,
   BookCommentResult,
+  BookshelfBookItem,
   Category,
   Chapter,
   ChapterContent,
@@ -12,6 +13,12 @@ import type {
   NewsItem,
   PageResult,
   SearchOptions,
+  UserBookshelfEntry,
+  UserCommentItem,
+  UserFeedbackItem,
+  UserProfileInfo,
+  UserReadingHistoryItem,
+  UserSex,
 } from './types'
 
 interface ApiBook {
@@ -68,6 +75,64 @@ interface ApiBookCommentResult {
   comments?: ApiCommentInfo[]
 }
 
+interface ApiBookshelfEntry {
+  id?: string | number
+  bookId?: string | number
+  preContentId?: string | number | null
+  chapterId?: string | number | null
+  contentId?: string | number | null
+  chapterNum?: string | number | null
+  chapterName?: string | null
+  chapterTotal?: string | number | null
+  createTime?: string | null
+  updateTime?: string | null
+}
+
+interface ApiReadingHistory {
+  id?: string | number
+  bookId?: string | number
+  preContentId?: string | number | null
+  chapterId?: string | number | null
+  contentId?: string | number | null
+  picUrl?: string
+  bookName?: string
+  chapterName?: string
+  createTime?: string | null
+  updateTime?: string | null
+}
+
+interface ApiUserInfo {
+  nickName?: string | null
+  userPhoto?: string | null
+  userSex?: string | number | null
+}
+
+interface ApiUserComment {
+  id?: string | number
+  commentId?: string | number
+  commentBookCommentId?: string | number
+  commentContent?: string
+  commentBookPic?: string
+  commentBookId?: string | number
+  commentBook?: string
+  commentTime?: string
+}
+
+interface ApiUserFeedback {
+  id?: string | number
+  userId?: string | number
+  content?: string
+  createTime?: string
+  updateTime?: string
+}
+
+interface PageQuery {
+  pageNum?: number
+  pageSize?: number
+  sort?: string
+  order?: string
+}
+
 function mapBook(raw: ApiBook, source: Book['source'] = 'api'): Book {
   const id = toText(raw.id ?? raw.bookId, `api-book-${Math.random().toString(36).slice(2)}`)
   const title = stripHtml(raw.bookName, '未命名作品')
@@ -90,6 +155,80 @@ function mapBook(raw: ApiBook, source: Book['source'] = 'api'): Book {
     lastChapterUpdateTime: toText(raw.lastChapterUpdateTime) || undefined,
     updatedAt: toText(raw.updateTime ?? raw.lastChapterUpdateTime, '最近更新'),
     source,
+  }
+}
+
+function pageList<T>(data?: PageResult<T> | T[] | null) {
+  return Array.isArray(data) ? data : (data?.list ?? [])
+}
+
+function normalizePageResult<T>(
+  data: PageResult<T> | T[] | null | undefined,
+  fallback: Required<Pick<PageQuery, 'pageNum' | 'pageSize'>>,
+): PageResult<T> {
+  const list = pageList(data)
+
+  if (Array.isArray(data)) {
+    return {
+      pageNum: fallback.pageNum,
+      pageSize: fallback.pageSize,
+      total: list.length,
+      list,
+      pages: list.length > 0 ? 1 : 0,
+    }
+  }
+
+  return {
+    pageNum: toNumber(data?.pageNum, fallback.pageNum),
+    pageSize: toNumber(data?.pageSize, fallback.pageSize),
+    total: toNumber(data?.total, list.length),
+    list,
+    pages: toNumber(data?.pages, list.length > 0 ? 1 : 0),
+  }
+}
+
+function mapApiSex(value: unknown): UserSex {
+  const sex = toNumber(value, -1)
+
+  if (sex === 0) {
+    return 'male'
+  }
+
+  if (sex === 1) {
+    return 'female'
+  }
+
+  return 'unknown'
+}
+
+function sexToApi(sex?: UserSex) {
+  if (sex === 'male') {
+    return 0
+  }
+
+  if (sex === 'female') {
+    return 1
+  }
+
+  return undefined
+}
+
+function toNumericId(value?: string) {
+  if (!value || !/^\d+$/.test(value)) {
+    return undefined
+  }
+
+  return Number(value)
+}
+
+function mapUserProfile(raw?: ApiUserInfo | null): UserProfileInfo {
+  const avatarPath = toText(raw?.userPhoto)
+
+  return {
+    nickName: stripHtml(raw?.nickName, ''),
+    avatar: resolveAssetUrl(avatarPath),
+    avatarPath,
+    sex: mapApiSex(raw?.userSex),
   }
 }
 
@@ -175,16 +314,12 @@ function parseChapterTitleNumber(title?: string) {
   return parseChineseNumber(rawNumber)
 }
 
-function calculateChapterTotal(rawChapters: ApiChapter[], fallback: number) {
-  const titleNumbers = rawChapters
-    .map((chapter) => parseChapterTitleNumber(chapter.chapterName))
-    .filter((value) => value > 0)
-
-  if (!titleNumbers.length) {
-    return fallback
+function getChapterTotal(data: PageResult<ApiChapter> | ApiChapter[] | null | undefined) {
+  if (Array.isArray(data)) {
+    return data.length
   }
 
-  return Math.max(...titleNumbers)
+  return toNumber(data?.total, pageList(data).length)
 }
 
 function mapNews(raw: ApiNews, index: number, fallbackId = `news-${index}`): NewsItem {
@@ -197,6 +332,83 @@ function mapNews(raw: ApiNews, index: number, fallbackId = `news-${index}`): New
     content: raw.content ? stripHtml(raw.content) : undefined,
     source: 'api',
   }
+}
+
+function mapBookshelfEntry(raw: ApiBookshelfEntry, index: number): UserBookshelfEntry {
+  const bookId = toText(raw.bookId)
+  const chapterId = toText(raw.preContentId ?? raw.chapterId ?? raw.contentId) || undefined
+  const chapterName = chapterId ? stripHtml(raw.chapterName, '') : undefined
+  const chapterNum = chapterId
+    ? toNumber(raw.chapterNum) || parseChapterTitleNumber(chapterName)
+    : undefined
+
+  return {
+    id: toText(raw.id, `${bookId || 'bookshelf'}-${index}`),
+    bookId,
+    chapterId,
+    chapterNum,
+    chapterName,
+    chapterTotal: toNumber(raw.chapterTotal),
+    addedAt: toText(raw.createTime, ''),
+    updatedAt: toText(raw.updateTime ?? raw.createTime, ''),
+  }
+}
+
+function mapReadingHistory(raw: ApiReadingHistory, index: number): UserReadingHistoryItem {
+  const bookId = toText(raw.bookId)
+  const chapterId = toText(raw.preContentId ?? raw.chapterId ?? raw.contentId)
+
+  return {
+    id: toText(raw.id, `${bookId || 'history'}-${chapterId || index}`),
+    bookId,
+    chapterId,
+    bookTitle: stripHtml(raw.bookName, bookId ? `作品 #${bookId}` : '未知作品'),
+    chapterTitle: stripHtml(raw.chapterName, chapterId ? `章节 #${chapterId}` : '未知章节'),
+    cover: resolveAssetUrl(raw.picUrl),
+    updatedAt: toText(raw.updateTime ?? raw.createTime, ''),
+  }
+}
+
+function mapUserComment(raw: ApiUserComment, index: number): UserCommentItem {
+  const bookId = toText(raw.commentBookId)
+  const commentId = toText(raw.commentId ?? raw.id ?? raw.commentBookCommentId)
+
+  return {
+    id: commentId || `${bookId || 'comment'}-${index}`,
+    commentId,
+    bookId,
+    bookTitle: stripHtml(raw.commentBook, bookId ? `作品 #${bookId}` : '未知作品'),
+    bookCover: resolveAssetUrl(raw.commentBookPic),
+    content: stripHtml(raw.commentContent, ''),
+    createdAt: toText(raw.commentTime, ''),
+  }
+}
+
+function mapUserFeedback(raw: ApiUserFeedback, index: number): UserFeedbackItem {
+  const createdAt = toText(raw.createTime, '')
+
+  return {
+    id: toText(raw.id, `feedback-${index}`),
+    content: stripHtml(raw.content, ''),
+    createdAt,
+    updatedAt: toText(raw.updateTime, createdAt),
+  }
+}
+
+function progressText(entry: UserBookshelfEntry) {
+  if (!entry.chapterId) {
+    return '未读过'
+  }
+
+  if (entry.chapterNum && entry.chapterTotal) {
+    return `${entry.chapterNum}章/${entry.chapterTotal}章`
+  }
+
+  if (entry.chapterName) {
+    return `读至 ${entry.chapterName}`
+  }
+
+  return '已读过'
 }
 
 export async function fetchUpdateRank() {
@@ -268,6 +480,64 @@ export async function fetchNewsDetail(newsId: string): Promise<NewsItem> {
   return mapNews(data ?? { id: newsId }, 0, newsId)
 }
 
+export async function fetchUserProfile(token?: string): Promise<UserProfileInfo> {
+  const data = await apiRequest<ApiUserInfo>(
+    '/api/front/user',
+    token
+      ? {
+          headers: { Authorization: token },
+          skipAuth: true,
+        }
+      : undefined,
+  )
+  return mapUserProfile(data)
+}
+
+export async function updateUserProfile(options: {
+  userId: string
+  nickName?: string
+  avatarPath?: string
+  sex?: UserSex
+}) {
+  const body: {
+    userId?: number
+    nickName?: string
+    userPhoto?: string
+    userSex?: number
+  } = {
+    userId: toNumericId(options.userId),
+    nickName: options.nickName,
+    userPhoto: options.avatarPath,
+    userSex: sexToApi(options.sex),
+  }
+
+  await apiRequest<void>('/api/front/user', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function uploadUserImage(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const imagePath = await apiRequest<string>('/api/front/resource/image', {
+    method: 'POST',
+    body: formData,
+  })
+
+  return toText(imagePath)
+}
+
+export function createDefaultUserAvatar(seed = 'takome-reader') {
+  const encodedSeed = encodeURIComponent(seed || 'takome-reader')
+
+  return {
+    path: '',
+    url: `https://api.dicebear.com/9.x/thumbs/svg?seed=${encodedSeed}`,
+  }
+}
+
 export async function searchBooks(options: SearchOptions = {}): Promise<PageResult<Book>> {
   const pageNum = options.pageNum ?? 1
   const pageSize = options.pageSize ?? 10
@@ -337,13 +607,29 @@ export async function fetchCategories(): Promise<Category[]> {
   ]
 }
 
-export async function fetchBook(bookId: string): Promise<Book> {
+export async function fetchBook(
+  bookId: string,
+  options: { fallback?: boolean } = {},
+): Promise<Book> {
+  const shouldFallback = options.fallback ?? true
+
   try {
     const data = await apiRequest<ApiBook>(`/api/front/book/${bookId}`)
-    return data ? mapBook(data) : (mockBooks.find((book) => book.id === bookId) ?? fallbackBook)
+
+    if (data) {
+      return mapBook(data)
+    }
   } catch {
-    return mockBooks.find((book) => book.id === bookId) ?? fallbackBook
+    if (!shouldFallback) {
+      throw new Error('小说详情加载失败')
+    }
   }
+
+  if (!shouldFallback) {
+    throw new Error('小说详情不存在')
+  }
+
+  return mockBooks.find((book) => book.id === bookId) ?? fallbackBook
 }
 
 export async function fetchChapters(
@@ -353,15 +639,19 @@ export async function fetchChapters(
   const shouldFallback = options.fallback ?? true
 
   try {
-    const data = await apiRequest<ApiChapter[]>('/api/front/book/chapter/list', {
-      query: { bookId },
-    })
-    const rawChapters = data ?? []
-    const chapters = (data ?? []).map((chapter, index) => mapChapter(chapter, bookId, index))
-    const fallbackChapters = chapters.length || !shouldFallback ? chapters : createMockChapters(bookId)
+    const data = await apiRequest<PageResult<ApiChapter> | ApiChapter[]>(
+      '/api/front/book/chapter/list',
+      {
+        query: { bookId },
+      },
+    )
+    const rawChapters = pageList(data)
+    const chapters = rawChapters.map((chapter, index) => mapChapter(chapter, bookId, index))
+    const usesApiChapters = chapters.length > 0 || !shouldFallback
+    const fallbackChapters = usesApiChapters ? chapters : createMockChapters(bookId)
 
     return {
-      total: calculateChapterTotal(rawChapters, fallbackChapters.length),
+      total: usesApiChapters ? getChapterTotal(data) : fallbackChapters.length,
       chapters: fallbackChapters,
     }
   } catch {
@@ -430,6 +720,100 @@ export async function fetchBookshelfStatus(bookId: string) {
   return toNumber(data) === 1 || toText(data).toLowerCase() === 'true'
 }
 
+export async function fetchUserBookshelfEntries(options: {
+  pageNum?: number
+  pageSize?: number
+  fetchAll?: boolean
+} = {}): Promise<UserBookshelfEntry[]> {
+  const data = await apiRequest<PageResult<ApiBookshelfEntry> | ApiBookshelfEntry[]>(
+    '/api/front/user/bookshelf',
+    {
+      query: {
+        pageNum: options.pageNum,
+        pageSize: options.pageSize,
+        fetchAll: options.fetchAll ?? true,
+      },
+    },
+  )
+
+  return pageList(data)
+    .map((entry, index) => mapBookshelfEntry(entry, index))
+    .filter((entry) => entry.bookId)
+}
+
+export async function fetchUserBookshelfBooks(): Promise<BookshelfBookItem[]> {
+  const entries = await fetchUserBookshelfEntries({ fetchAll: true })
+
+  return Promise.all(
+    entries.map(async (entry) => {
+      const book = await fetchBook(entry.bookId, { fallback: false })
+
+      return {
+        entry,
+        book,
+        continueChapterId: entry.chapterId ?? book.firstChapterId,
+        progressText: progressText(entry),
+      }
+    }),
+  )
+}
+
+export async function addBookToBookshelf(bookId: string) {
+  await apiRequest<void>('/api/front/user/bookshelf', {
+    method: 'POST',
+    body: JSON.stringify({ bookId }),
+  })
+}
+
+export async function removeBookFromBookshelf(bookId: string) {
+  await apiRequest<void>(`/api/front/user/bookshelf/${bookId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function recordReadingHistory(bookId: string, chapterId: string) {
+  await apiRequest<void>('/api/front/user/read_history', {
+    method: 'POST',
+    body: JSON.stringify({ bookId, chapterId }),
+  })
+}
+
+export async function fetchUserReadingHistory(options: {
+  pageNum?: number
+  pageSize?: number
+  withinDays?: number
+  fetchAll?: boolean
+} = {}): Promise<UserReadingHistoryItem[]> {
+  const data = await apiRequest<PageResult<ApiReadingHistory> | ApiReadingHistory[]>(
+    '/api/front/user/read_history',
+    {
+      query: {
+        pageNum: options.pageNum,
+        pageSize: options.pageSize,
+        withinDays: options.withinDays ?? 30,
+        fetchAll: options.fetchAll ?? true,
+      },
+    },
+  )
+
+  return pageList(data)
+    .map((history, index) => mapReadingHistory(history, index))
+    .filter((history) => history.bookId && history.chapterId)
+}
+
+export async function deleteReadingHistory(historyId: string) {
+  await apiRequest<void>(`/api/front/user/read_history/${historyId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function deleteReadingHistories(historyIds: string[]) {
+  await apiRequest<void>('/api/front/user/read_history/batch', {
+    method: 'DELETE',
+    body: JSON.stringify({ ids: historyIds }),
+  })
+}
+
 export async function fetchBookComments(bookId: string): Promise<BookCommentResult> {
   try {
     const data = await apiRequest<ApiBookCommentResult>('/api/front/book/comment/newest_list', {
@@ -456,6 +840,25 @@ export async function fetchBookComments(bookId: string): Promise<BookCommentResu
   }
 }
 
+export async function fetchUserComments(options: PageQuery = {}): Promise<PageResult<UserCommentItem>> {
+  const pageNum = options.pageNum ?? 1
+  const pageSize = options.pageSize ?? 10
+  const data = await apiRequest<PageResult<ApiUserComment>>('/api/front/user/comments', {
+    query: {
+      pageNum,
+      pageSize,
+      sort: options.sort,
+      order: options.order,
+    },
+  })
+  const page = normalizePageResult(data, { pageNum, pageSize })
+
+  return {
+    ...page,
+    list: page.list.map((comment, index) => mapUserComment(comment, index)),
+  }
+}
+
 export async function createBookComment(bookId: string, userId: string, commentContent: string) {
   await apiRequest<void>('/api/front/user/comment', {
     method: 'POST',
@@ -472,6 +875,41 @@ export async function updateBookComment(commentId: string, content: string) {
 
 export async function deleteBookComment(commentId: string) {
   await apiRequest<void>(`/api/front/user/comment/${commentId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function fetchUserFeedback(options: PageQuery = {}): Promise<PageResult<UserFeedbackItem>> {
+  const pageNum = options.pageNum ?? 1
+  const pageSize = options.pageSize ?? 10
+  const data = await apiRequest<PageResult<ApiUserFeedback> | ApiUserFeedback[]>(
+    '/api/front/user/feedback',
+    {
+      query: {
+        pageNum,
+        pageSize,
+        sort: options.sort,
+        order: options.order,
+      },
+    },
+  )
+  const page = normalizePageResult(data, { pageNum, pageSize })
+
+  return {
+    ...page,
+    list: page.list.map((feedback, index) => mapUserFeedback(feedback, index)),
+  }
+}
+
+export async function submitUserFeedback(content: string) {
+  await apiRequest<void>('/api/front/user/feedback', {
+    method: 'POST',
+    body: content,
+  })
+}
+
+export async function deleteUserFeedback(feedbackId: string) {
+  await apiRequest<void>(`/api/front/user/feedback/${feedbackId}`, {
     method: 'DELETE',
   })
 }

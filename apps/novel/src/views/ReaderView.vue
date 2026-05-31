@@ -7,19 +7,26 @@ import ReaderChapterInfo from '@/components/reader/ReaderChapterInfo.vue'
 import ReaderChapterNav from '@/components/reader/ReaderChapterNav.vue'
 import ReaderHeader from '@/components/reader/ReaderHeader.vue'
 import ReaderSideMenu from '@/components/reader/ReaderSideMenu.vue'
-import { useLibraryState } from '@/composables/useLibraryState'
+import { useAuth } from '@/composables/useAuth'
 import { getReaderSettings, setReaderSettings } from '@/services/storage'
 import {
+  addBookToBookshelf,
   fetchBookshelfStatus,
   fetchChapterContent,
   fetchChapters,
   fetchNextChapterId,
   fetchPreviousChapterId,
+  recordReadingHistory,
+  removeBookFromBookshelf,
 } from '@/services/novelApi'
 import type { Chapter, ChapterContent } from '@/services/types'
 
+const emit = defineEmits<{
+  loginRequired: []
+}>()
+
 const route = useRoute()
-const { isInBookshelf, recordReading, toggleBookshelf } = useLibraryState()
+const { isAuthenticated } = useAuth()
 
 const content = shallowRef<ChapterContent>()
 const chapters = shallowRef<Chapter[]>([])
@@ -29,7 +36,6 @@ const errorMessage = shallowRef('')
 const previousChapterId = shallowRef<string>()
 const nextChapterId = shallowRef<string>()
 const backendBookshelfStatus = shallowRef<boolean>()
-const bookshelfOverride = shallowRef<boolean>()
 const bookshelfLoading = shallowRef(false)
 const isHeaderVisible = shallowRef(true)
 const lastScrollY = shallowRef(0)
@@ -45,7 +51,7 @@ const isSaved = computed(() => {
     return false
   }
 
-  return bookshelfOverride.value ?? backendBookshelfStatus.value ?? isInBookshelf(book.value.id)
+  return backendBookshelfStatus.value ?? false
 })
 const readerClass = computed(() => ({
   'reader-night': settings.value.night,
@@ -63,7 +69,6 @@ async function loadReader() {
   previousChapterId.value = undefined
   nextChapterId.value = undefined
   backendBookshelfStatus.value = undefined
-  bookshelfOverride.value = undefined
 
   try {
     const chapterContent = await fetchChapterContent(activeChapterId)
@@ -74,13 +79,17 @@ async function loadReader() {
 
     content.value = chapterContent
     window.scrollTo({ top: 0 })
-    recordReading(chapterContent.book, chapterContent.chapter.id, chapterContent.chapter.title)
 
     const [chapterData, previousId, nextId, bookshelfStatus] = await Promise.all([
       fetchChapters(chapterContent.book.id, { fallback: false }),
       fetchPreviousChapterId(activeChapterId),
       fetchNextChapterId(activeChapterId),
-      fetchBookshelfStatus(chapterContent.book.id).catch(() => undefined),
+      isAuthenticated.value
+        ? fetchBookshelfStatus(chapterContent.book.id).catch(() => undefined)
+        : Promise.resolve(undefined),
+      isAuthenticated.value
+        ? recordReadingHistory(chapterContent.book.id, chapterContent.chapter.id).catch(() => undefined)
+        : Promise.resolve(undefined),
     ])
 
     if (activeChapterId !== chapterId.value) {
@@ -122,19 +131,29 @@ function handleScroll() {
   lastScrollY.value = nextY
 }
 
-function handleBookshelf() {
-  if (!book.value || isSaved.value) {
+async function handleBookshelf() {
+  if (!book.value) {
+    return
+  }
+
+  if (!isAuthenticated.value) {
+    emit('loginRequired')
     return
   }
 
   bookshelfLoading.value = true
 
-  if (!isInBookshelf(book.value.id)) {
-    toggleBookshelf(book.value.id)
+  try {
+    if (isSaved.value) {
+      await removeBookFromBookshelf(book.value.id)
+      backendBookshelfStatus.value = false
+    } else {
+      await addBookToBookshelf(book.value.id)
+      backendBookshelfStatus.value = true
+    }
+  } finally {
+    bookshelfLoading.value = false
   }
-
-  bookshelfOverride.value = true
-  bookshelfLoading.value = false
 }
 
 watch(chapterId, () => {

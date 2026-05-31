@@ -2,23 +2,85 @@
 import { computed, onMounted, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
 
-import BookCard from '@/components/BookCard.vue'
-import BookCover from '@/components/BookCover.vue'
-import { useLibraryState } from '@/composables/useLibraryState'
-import { fetchBook } from '@/services/novelApi'
-import type { Book } from '@/services/types'
+import BookshelfFavoriteCard from '@/components/bookshelf/BookshelfFavoriteCard.vue'
+import ReadingHistoryList from '@/components/bookshelf/ReadingHistoryList.vue'
+import {
+  deleteReadingHistories,
+  deleteReadingHistory,
+  fetchUserBookshelfBooks,
+  fetchUserReadingHistory,
+} from '@/services/novelApi'
+import type { BookshelfBookItem, UserReadingHistoryItem } from '@/services/types'
 
-const { bookshelf, readingRecords } = useLibraryState()
-const savedBooks = shallowRef<Book[]>([])
+const favoriteItems = shallowRef<BookshelfBookItem[]>([])
+const historyItems = shallowRef<UserReadingHistoryItem[]>([])
+const favoriteLoading = shallowRef(false)
+const historyLoading = shallowRef(false)
+const favoriteError = shallowRef('')
+const historyError = shallowRef('')
+const deletingIds = shallowRef<string[]>([])
 
-const latestReading = computed(() => readingRecords.value.slice(0, 12))
+const favoriteCountText = computed(() => `${favoriteItems.value.length} 本`)
+const historyCountText = computed(() => `${historyItems.value.length} 条`)
 
-async function loadSavedBooks() {
-  savedBooks.value = await Promise.all(bookshelf.value.map((entry) => fetchBook(entry.bookId)))
+async function loadFavorites() {
+  favoriteLoading.value = true
+  favoriteError.value = ''
+
+  try {
+    favoriteItems.value = await fetchUserBookshelfBooks()
+  } catch (error) {
+    favoriteItems.value = []
+    favoriteError.value = error instanceof Error ? error.message : '我的收藏加载失败'
+  } finally {
+    favoriteLoading.value = false
+  }
+}
+
+async function loadHistory() {
+  historyLoading.value = true
+  historyError.value = ''
+
+  try {
+    historyItems.value = await fetchUserReadingHistory({ withinDays: 30, fetchAll: true })
+  } catch (error) {
+    historyItems.value = []
+    historyError.value = error instanceof Error ? error.message : '最近阅读加载失败'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function deleteOneHistory(historyId: string) {
+  deletingIds.value = [...deletingIds.value, historyId]
+
+  try {
+    await deleteReadingHistory(historyId)
+    historyItems.value = historyItems.value.filter((item) => item.id !== historyId)
+  } finally {
+    deletingIds.value = deletingIds.value.filter((id) => id !== historyId)
+  }
+}
+
+async function deleteBatchHistory(historyIds: string[]) {
+  if (!historyIds.length) {
+    return
+  }
+
+  deletingIds.value = [...new Set([...deletingIds.value, ...historyIds])]
+
+  try {
+    await deleteReadingHistories(historyIds)
+    const deletedSet = new Set(historyIds)
+    historyItems.value = historyItems.value.filter((item) => !deletedSet.has(item.id))
+  } finally {
+    deletingIds.value = deletingIds.value.filter((id) => !historyIds.includes(id))
+  }
 }
 
 onMounted(() => {
-  void loadSavedBooks()
+  void loadFavorites()
+  void loadHistory()
 })
 </script>
 
@@ -27,49 +89,48 @@ onMounted(() => {
     <section class="page-head">
       <p class="meta-label">Bookshelf</p>
       <h1 class="serif">我的书架</h1>
-      <p>收藏和最近阅读都保存在当前浏览器，可用于开发环境跨端口演示。</p>
     </section>
 
     <section class="content-block">
       <div class="section-head">
-        <h2 class="section-title">我的收藏</h2>
-        <span>{{ savedBooks.length }} 本</span>
+        <div>
+          <p class="meta-label">Favorites</p>
+          <h2 class="section-title">我的收藏</h2>
+        </div>
+        <span>{{ favoriteLoading ? '加载中' : favoriteCountText }}</span>
       </div>
 
-      <div v-if="savedBooks.length" class="book-grid">
-        <BookCard v-for="book in savedBooks" :key="book.id" :book="book" />
+      <div v-if="favoriteItems.length" class="favorite-grid">
+        <BookshelfFavoriteCard v-for="item in favoriteItems" :key="item.entry.id" :item="item" />
       </div>
-      <div v-else class="empty-state surface-panel">
-        <p class="serif">收藏还为空</p>
-        <span>在详情页或阅读页点击“加入书架”后会出现在这里。</span>
+
+      <div v-else class="empty-state">
+        <p class="empty-title">{{ favoriteLoading ? '正在加载我的收藏' : '空空如也' }}</p>
+        <span>{{ favoriteError || '' }}</span>
         <RouterLink class="btn-primary" :to="{ name: 'library' }">去书库找书</RouterLink>
       </div>
     </section>
 
     <section class="content-block">
       <div class="section-head">
-        <h2 class="section-title">最近阅读</h2>
-        <span>{{ latestReading.length }} 本</span>
+        <div>
+          <p class="meta-label">Recent</p>
+          <h2 class="section-title">最近阅读</h2>
+        </div>
+        <span>{{ historyLoading ? '加载中' : historyCountText }}</span>
       </div>
 
-      <div v-if="latestReading.length" class="reading-list surface-panel">
-        <RouterLink
-          v-for="record in latestReading"
-          :key="`${record.bookId}-${record.chapterId}`"
-          class="reading-row"
-          :to="{ name: 'reader', params: { chapterId: record.chapterId } }"
-        >
-          <BookCover :title="record.bookTitle" :cover="record.cover" size="sm" />
-          <div>
-            <strong class="serif">{{ record.bookTitle }}</strong>
-            <p>{{ record.chapterTitle }}</p>
-          </div>
-          <span>{{ new Date(record.updatedAt).toLocaleString() }}</span>
-        </RouterLink>
-      </div>
-      <div v-else class="empty-state surface-panel">
-        <p class="serif">暂无阅读记录</p>
-        <span>打开任意章节后，这里会记录最近阅读。</span>
+      <ReadingHistoryList
+        v-if="historyItems.length"
+        :items="historyItems"
+        :deleting-ids="deletingIds"
+        @delete-one="deleteOneHistory"
+        @delete-batch="deleteBatchHistory"
+      />
+
+      <div v-else class="empty-state">
+        <p class="empty-title">{{ historyLoading ? '正在加载最近阅读' : '暂无阅读记录' }}</p>
+        <span>{{ historyError || '' }}</span>
       </div>
     </section>
   </main>
@@ -77,12 +138,17 @@ onMounted(() => {
 
 <style scoped>
 .bookshelf-page {
-  padding-top: 54px;
+  padding-top: 46px;
+}
+
+.page-head {
+  display: grid;
+  gap: 10px;
 }
 
 .page-head h1 {
-  margin: 8px 0 10px;
-  font-size: 52px;
+  margin: 0;
+  font-size: clamp(40px, 5vw, 58px);
   font-weight: 600;
 }
 
@@ -91,8 +157,13 @@ onMounted(() => {
   color: var(--color-muted);
 }
 
+.page-head p:last-child {
+  margin: 0;
+  font-size: 15px;
+}
+
 .content-block {
-  margin-top: 42px;
+  margin-top: 36px;
 }
 
 .section-head {
@@ -103,74 +174,67 @@ onMounted(() => {
   margin-bottom: 18px;
 }
 
-.book-grid {
+.section-head .meta-label {
+  margin: 0 0 7px;
+}
+
+.section-head span {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.favorite-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.reading-list {
-  display: grid;
-  padding: 8px 22px;
-}
-
-.reading-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: center;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--color-line);
-}
-
-.reading-row:last-child {
-  border-bottom: 0;
-}
-
-.reading-row strong {
-  color: var(--color-ink);
-  font-size: 21px;
-  font-weight: 600;
-}
-
-.reading-row p,
-.reading-row span {
-  color: var(--color-muted);
-}
-
-.reading-row p {
-  margin: 6px 0 0;
-}
-
-.reading-row span {
-  font-size: 13px;
+  gap: 14px;
 }
 
 .empty-state {
   display: grid;
   gap: 14px;
   justify-items: start;
-  padding: 32px;
+  min-height: 176px;
+  align-content: center;
+  padding: 30px;
+  border: 1px solid rgba(110, 122, 109, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
   color: var(--color-muted);
+  box-shadow: var(--shadow-paper);
 }
 
-.empty-state p {
+.empty-title {
   margin: 0;
   color: var(--color-ink);
-  font-size: 28px;
+  font-family: Newsreader, Georgia, 'Times New Roman', serif;
+  font-size: 27px;
+  font-weight: 600;
 }
 
-@media (max-width: 920px) {
-  .book-grid {
+.empty-state span {
+  line-height: 1.7;
+}
+
+@media (max-width: 1120px) {
+  .favorite-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .favorite-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .section-head {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .favorite-grid {
     grid-template-columns: 1fr;
-  }
-
-  .reading-row {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .reading-row span {
-    grid-column: 2;
   }
 }
 </style>

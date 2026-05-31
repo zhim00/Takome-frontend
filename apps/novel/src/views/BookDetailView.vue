@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
 import BookCover from '@/components/BookCover.vue'
 import ChapterDrawer from '@/components/ChapterDrawer.vue'
 import CommentPanel from '@/components/CommentPanel.vue'
 import { useAuth } from '@/composables/useAuth'
-import { useLibraryState } from '@/composables/useLibraryState'
 import {
+  addBookToBookshelf,
   fetchBook,
   fetchBookComments,
+  fetchBookshelfStatus,
   fetchBookRecommendations,
   fetchChapters,
   increaseBookVisit,
+  removeBookFromBookshelf,
 } from '@/services/novelApi'
 import { formatCount, formatWords, statusLabel } from '@/services/format'
 import type { Book, BookComment, Chapter } from '@/services/types'
@@ -23,7 +25,6 @@ const emit = defineEmits<{
 
 const route = useRoute()
 const { isAuthenticated } = useAuth()
-const { isInBookshelf, toggleBookshelf } = useLibraryState()
 
 const book = shallowRef<Book>()
 const chapters = shallowRef<Chapter[]>([])
@@ -32,11 +33,12 @@ const relatedBooks = shallowRef<Book[]>([])
 const commentTotal = shallowRef(0)
 const chapterTotal = shallowRef(0)
 const loading = shallowRef(false)
+const bookshelfLoading = shallowRef(false)
+const isSaved = shallowRef(false)
 const isCatalogOpen = shallowRef(false)
 
 const bookId = computed(() => String(route.params.id))
 const firstChapter = computed(() => chapters.value[0])
-const isSaved = computed(() => (book.value ? isInBookshelf(book.value.id) : false))
 const previewChapters = computed(() => chapters.value.slice(0, 30))
 const authorAvatar = computed(() => {
   const seed = encodeURIComponent(book.value?.author || 'Takome')
@@ -46,6 +48,7 @@ const authorAvatar = computed(() => {
 async function loadDetail() {
   loading.value = true
   const currentBookId = bookId.value
+  isSaved.value = false
 
   try {
     await increaseBookVisit(currentBookId).catch(() => undefined)
@@ -63,6 +66,12 @@ async function loadDetail() {
     apiComments.value = commentData.comments
     commentTotal.value = commentData.total
     relatedBooks.value = recommendationData
+
+    if (isAuthenticated.value) {
+      isSaved.value = await fetchBookshelfStatus(bookData.id).catch(() => false)
+    }
+
+    await scrollToRouteHash()
   } finally {
     loading.value = false
   }
@@ -74,7 +83,28 @@ async function reloadComments() {
   commentTotal.value = commentData.total
 }
 
-function handleBookshelf() {
+async function scrollToRouteHash() {
+  if (route.hash !== '#comments') {
+    return
+  }
+
+  await nextTick()
+  document.querySelector(route.hash)?.scrollIntoView({
+    behavior: 'smooth',
+    block: 'start',
+  })
+}
+
+async function refreshBookshelfStatus() {
+  if (!book.value || !isAuthenticated.value) {
+    isSaved.value = false
+    return
+  }
+
+  isSaved.value = await fetchBookshelfStatus(book.value.id).catch(() => false)
+}
+
+async function handleBookshelf() {
   if (!book.value) {
     return
   }
@@ -84,11 +114,34 @@ function handleBookshelf() {
     return
   }
 
-  toggleBookshelf(book.value.id)
+  bookshelfLoading.value = true
+
+  try {
+    if (isSaved.value) {
+      await removeBookFromBookshelf(book.value.id)
+      isSaved.value = false
+    } else {
+      await addBookToBookshelf(book.value.id)
+      isSaved.value = true
+    }
+  } finally {
+    bookshelfLoading.value = false
+  }
 }
 
 watch(bookId, () => {
   void loadDetail()
+})
+
+watch(
+  () => route.hash,
+  () => {
+    void scrollToRouteHash()
+  },
+)
+
+watch(isAuthenticated, () => {
+  void refreshBookshelfStatus()
 })
 
 onMounted(() => {
@@ -121,7 +174,12 @@ onMounted(() => {
             >
               开始阅读
             </RouterLink>
-            <button class="btn-secondary" type="button" @click="handleBookshelf">
+            <button
+              class="btn-secondary"
+              type="button"
+              :disabled="bookshelfLoading"
+              @click="handleBookshelf"
+            >
               {{ isSaved ? '移除书架' : '加入书架' }}
             </button>
           </div>

@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import BookCard from '@/components/BookCard.vue'
 import BookCover from '@/components/BookCover.vue'
 import { useAuth } from '@/composables/useAuth'
-import { useLibraryState } from '@/composables/useLibraryState'
 import {
+  addBookToBookshelf,
+  fetchBookshelfStatus,
   fetchHomeBooks,
   fetchNews,
   fetchUpdateRank,
   fetchVisitRank,
+  removeBookFromBookshelf,
 } from '@/services/novelApi'
 import { formatDateLabel, formatWords, statusLabel } from '@/services/format'
 import type { Book, NewsItem } from '@/services/types'
@@ -20,13 +22,14 @@ const emit = defineEmits<{
 }>()
 
 const { isAuthenticated } = useAuth()
-const { isInBookshelf, toggleBookshelf } = useLibraryState()
 
 const updateRank = shallowRef<Book[]>([])
 const visitRank = shallowRef<Book[]>([])
 const homeHotBooks = shallowRef<Book[]>([])
 const news = shallowRef<NewsItem[]>([])
 const todayRecommendation = shallowRef<Book>()
+const recommendationSaved = shallowRef(false)
+const recommendationBookshelfLoading = shallowRef(false)
 const loading = shallowRef(false)
 const recommendationError = shallowRef('')
 
@@ -36,9 +39,6 @@ const latestUpdates = computed(() => updateRank.value)
 const rankTopTen = computed(() => updateRank.value.slice(0, 10))
 const topRankBook = computed(() => rankTopTen.value[0])
 const restRankBooks = computed(() => rankTopTen.value.slice(1))
-const isRecommendationSaved = computed(() =>
-  todayRecommendation.value ? isInBookshelf(todayRecommendation.value.id) : false,
-)
 
 function pickRandomBook(books: Book[]) {
   if (!books.length) {
@@ -46,6 +46,21 @@ function pickRandomBook(books: Book[]) {
   }
 
   return books[Math.floor(Math.random() * books.length)]
+}
+
+async function loadRecommendationBookshelfStatus() {
+  const bookId = todayRecommendation.value?.id
+  recommendationSaved.value = false
+
+  if (!bookId || !isAuthenticated.value) {
+    return
+  }
+
+  try {
+    recommendationSaved.value = await fetchBookshelfStatus(bookId)
+  } catch {
+    recommendationSaved.value = false
+  }
 }
 
 async function loadHome() {
@@ -67,13 +82,13 @@ async function loadHome() {
   todayRecommendation.value = pickRandomBook(visitRank.value)
 
   if (!todayRecommendation.value) {
-    recommendationError.value = '书被老鼠偷走了，稍后再试试吧~'
+    recommendationError.value = '暂无可用推荐，稍后再试试吧'
   }
 
   loading.value = false
 }
 
-function handleAddToBookshelf() {
+async function handleAddToBookshelf() {
   if (!todayRecommendation.value) {
     return
   }
@@ -83,8 +98,24 @@ function handleAddToBookshelf() {
     return
   }
 
-  toggleBookshelf(todayRecommendation.value.id)
+  recommendationBookshelfLoading.value = true
+
+  try {
+    if (recommendationSaved.value) {
+      await removeBookFromBookshelf(todayRecommendation.value.id)
+      recommendationSaved.value = false
+    } else {
+      await addBookToBookshelf(todayRecommendation.value.id)
+      recommendationSaved.value = true
+    }
+  } finally {
+    recommendationBookshelfLoading.value = false
+  }
 }
+
+watch([todayRecommendation, isAuthenticated], () => {
+  void loadRecommendationBookshelfStatus()
+})
 
 onMounted(() => {
   void loadHome()
@@ -114,8 +145,13 @@ onMounted(() => {
             >
               开始阅读
             </RouterLink>
-            <button class="btn-secondary" type="button" @click="handleAddToBookshelf">
-              {{ isRecommendationSaved ? '已在书架' : '加入书架' }}
+            <button
+              class="btn-secondary"
+              type="button"
+              :disabled="recommendationBookshelfLoading"
+              @click="handleAddToBookshelf"
+            >
+              {{ recommendationSaved ? '移除书架' : '加入书架' }}
             </button>
           </div>
         </div>

@@ -5,10 +5,11 @@ import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import assistantIcon from '@/assets/ai_assistant.apng'
 import LoginDialog from '@/components/LoginDialog.vue'
 import { useAuth } from '@/composables/useAuth'
+import { AUTH_EXPIRED_EVENT } from '@/services/storage'
 
 const route = useRoute()
 const router = useRouter()
-const { user, isAuthenticated, logout, updateAvatar } = useAuth()
+const { user, isAuthenticated, logout } = useAuth()
 
 const isLoginOpen = shallowRef(false)
 const isUserMenuOpen = shallowRef(false)
@@ -63,27 +64,26 @@ function closeUserMenuFromOutside(event: MouseEvent) {
   }
 }
 
-function handleAvatarUpload(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-
-  if (!file) {
-    return
-  }
-
-  const reader = new FileReader()
-  reader.addEventListener('load', () => {
-    if (typeof reader.result === 'string') {
-      updateAvatar(reader.result)
-    }
-  })
-  reader.readAsDataURL(file)
-  input.value = ''
-}
-
-function logoutAndClose() {
+async function logoutAndClose() {
   logout()
   isUserMenuOpen.value = false
+  await router.replace({ name: 'home' })
+  window.location.reload()
+}
+
+async function handleAuthExpired() {
+  isLoginOpen.value = false
+  isUserMenuOpen.value = false
+
+  if (route.name !== 'home') {
+    await router.replace({ name: 'home' })
+  }
+}
+
+async function returnHomeIfSignedOut() {
+  if (!isAuthenticated.value && route.meta.requiresAuth) {
+    await router.replace({ name: 'home' })
+  }
 }
 
 watch(
@@ -94,12 +94,21 @@ watch(
   { immediate: true },
 )
 
+watch(
+  [isAuthenticated, () => route.meta.requiresAuth],
+  () => {
+    void returnHomeIfSignedOut()
+  },
+)
+
 onMounted(() => {
   document.addEventListener('click', closeUserMenuFromOutside)
+  window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeUserMenuFromOutside)
+  window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
 })
 </script>
 
@@ -162,10 +171,6 @@ onBeforeUnmount(() => {
           </button>
 
           <div v-if="isUserMenuOpen" class="user-menu-panel">
-            <label class="user-menu-upload">
-              上传头像
-              <input type="file" accept="image/*" @change="handleAvatarUpload" />
-            </label>
             <RouterLink class="user-menu-item" :to="{ name: 'profile' }" @click="isUserMenuOpen = false">
               个人中心
             </RouterLink>
@@ -345,14 +350,19 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid var(--color-line);
   border-radius: 50%;
+  padding: 0;
   background: var(--color-surface);
   color: var(--color-primary);
   font-weight: 800;
+  line-height: 1;
 }
 
 .avatar-image {
+  display: block;
   width: 100%;
   height: 100%;
+  max-width: none;
+  border-radius: inherit;
   object-fit: cover;
 }
 
@@ -369,8 +379,7 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-paper);
 }
 
-.user-menu-item,
-.user-menu-upload {
+.user-menu-item {
   padding: 10px 12px;
   border-radius: 4px;
   color: var(--color-ink);
@@ -378,14 +387,9 @@ onBeforeUnmount(() => {
   text-align: left;
 }
 
-.user-menu-item:hover,
-.user-menu-upload:hover {
+.user-menu-item:hover {
   background: var(--color-paper-muted);
   color: var(--color-primary);
-}
-
-.user-menu-upload input {
-  display: none;
 }
 
 .assistant-dock {

@@ -1,4 +1,4 @@
-import { getAuthUser } from './storage'
+import { clearExpiredAuth, getAuthUser } from './storage'
 import type { ApiResult } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8888'
@@ -7,6 +7,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status?: number,
+    public readonly code?: string,
   ) {
     super(message)
   }
@@ -26,7 +27,11 @@ function buildUrl(path: string, query?: Record<string, string | number | boolean
 
 export async function apiRequest<T>(
   path: string,
-  options: RequestInit & { query?: Record<string, string | number | boolean | undefined> } = {},
+  options: RequestInit & {
+    query?: Record<string, string | number | boolean | undefined>
+    skipAuth?: boolean
+    skipAuthExpiredHandler?: boolean
+  } = {},
 ) {
   const token = getAuthUser()?.token
   const headers = new Headers(options.headers)
@@ -35,7 +40,7 @@ export async function apiRequest<T>(
     headers.set('Content-Type', 'application/json')
   }
 
-  if (token) {
+  if (token && !options.skipAuth) {
     headers.set('Authorization', token)
   }
 
@@ -51,7 +56,11 @@ export async function apiRequest<T>(
   const result = (await response.json()) as ApiResult<T>
 
   if (result.ok === false) {
-    throw new ApiError(result.message ?? '接口返回失败')
+    if (result.code === 'A0230' && !options.skipAuthExpiredHandler) {
+      clearExpiredAuth()
+    }
+
+    throw new ApiError(result.message ?? '接口返回失败', undefined, result.code)
   }
 
   return result.data as T

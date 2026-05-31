@@ -95,10 +95,8 @@ onBeforeUnmount(() => {
       <svg class="side-icon" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M5 5.8c2.8-.7 4.9-.2 7 1.4 2.1-1.6 4.2-2.1 7-1.4v12.3c-2.8-.7-4.9-.2-7 1.4-2.1-1.6-4.2-2.1-7-1.4V5.8Z" />
         <path d="M12 7.2v12.3" />
-        <path v-if="isSaved" d="m8.5 12.2 2 2 4.2-4.8" />
-        <path v-else d="M16.7 2.8v5.1M14.1 5.35h5.2" />
       </svg>
-      <span>加入书架</span>
+      <span>{{ isSaved ? '移除书架' : '加入书架' }}</span>
     </button>
 
     <button class="side-action" type="button" @click="emit('catalog')">
