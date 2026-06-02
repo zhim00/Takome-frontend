@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import assistantIcon from '@/assets/ai_assistant.apng'
 import LoginDialog from '@/components/LoginDialog.vue'
+import ReadingAssistantPanel from '@/components/ReadingAssistantPanel.vue'
 import { useAuth } from '@/composables/useAuth'
 import { AUTH_EXPIRED_EVENT } from '@/services/storage'
 
@@ -12,6 +13,7 @@ const router = useRouter()
 const { user, isAuthenticated, logout } = useAuth()
 
 const isLoginOpen = shallowRef(false)
+const isAssistantOpen = shallowRef(false)
 const isUserMenuOpen = shallowRef(false)
 const searchKeyword = shallowRef('')
 const userMenuRef = useTemplateRef<HTMLElement>('userMenu')
@@ -42,6 +44,10 @@ function handleNavClick(event: MouseEvent, targetName: string) {
     event.preventDefault()
     isLoginOpen.value = true
   }
+}
+
+function openLoginDialog() {
+  isLoginOpen.value = true
 }
 
 function syncSearchFromRoute() {
@@ -155,7 +161,7 @@ onBeforeUnmount(() => {
 
         <span class="site-action-divider" aria-hidden="true"></span>
 
-        <button v-if="!isAuthenticated" class="btn-secondary" type="button" @click="isLoginOpen = true">
+        <button v-if="!isAuthenticated" class="btn-secondary" type="button" @click="openLoginDialog">
           登录
         </button>
 
@@ -180,14 +186,27 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <RouterView @login-required="isLoginOpen = true" />
+    <RouterView @login-required="openLoginDialog" />
 
     <aside v-if="!isReader" class="assistant-dock" aria-label="浮动工具">
-      <button v-for="item in dockItems" :key="item.label" class="assistant-dock-item" type="button">
+      <button
+        v-for="item in dockItems"
+        :key="item.label"
+        class="assistant-dock-item"
+        type="button"
+        @click="isAssistantOpen = true"
+      >
         <img :src="item.icon" alt="" />
         <span>{{ item.label }}</span>
       </button>
     </aside>
+
+    <ReadingAssistantPanel
+      v-if="!isReader && isAssistantOpen"
+      :is-authenticated="isAuthenticated"
+      @close="isAssistantOpen = false"
+      @login-required="openLoginDialog"
+    />
 
     <footer v-if="!isReader" class="site-footer">
       <div class="layout-container site-footer-inner">
@@ -195,7 +214,7 @@ onBeforeUnmount(() => {
           <p class="serif">Takome Novel</p>
           <span>© 2026 Takome. 致力于长篇叙事的艺术。</span>
         </div>
-        <span class="site-footer-desc">发现、收藏、阅读、评论与个人中心。</span>
+        <span class="site-footer-desc">发现、收藏、阅读、评论</span>
       </div>
     </footer>
 
