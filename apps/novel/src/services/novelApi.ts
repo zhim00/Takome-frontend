@@ -1,6 +1,7 @@
-import { apiRequest } from './apiClient'
+import { apiRequest, apiStreamRequest } from './apiClient'
 import { mockBooks, fallbackBook, createMockChapters } from './mockData'
 import { compactText, resolveAssetUrl, stripHtml, toNumber, toText } from './format'
+import type { SseStreamEvent } from './apiClient'
 import type {
   Book,
   BookComment,
@@ -65,6 +66,7 @@ interface ApiCommentInfo {
   id?: string | number
   commentContent?: string
   commentUser?: string
+  commentUserNickName?: string
   commentUserId?: string | number
   commentUserPhoto?: string
   commentTime?: string
@@ -131,6 +133,17 @@ interface PageQuery {
   pageSize?: number
   sort?: string
   order?: string
+}
+
+interface AiChatStreamOptions {
+  message: string
+  conversationId: string
+  signal?: AbortSignal
+  onToken: (text: string) => void | Promise<void>
+  onToolStart?: (name: string) => void | Promise<void>
+  onToolEnd?: (name: string) => void | Promise<void>
+  onError?: (message: string) => void | Promise<void>
+  onDone?: () => void | Promise<void>
 }
 
 function mapBook(raw: ApiBook, source: Book['source'] = 'api'): Book {
@@ -219,6 +232,71 @@ function toNumericId(value?: string) {
   }
 
   return Number(value)
+}
+
+function parseAiStreamPayload(event: SseStreamEvent) {
+  try {
+    return (event.data ? JSON.parse(event.data) : {}) as Record<string, unknown>
+  } catch {
+    throw new Error('AI 响应解析失败')
+  }
+}
+
+function readRequiredString(payload: Record<string, unknown>, key: string) {
+  const value = payload[key]
+
+  if (typeof value !== 'string') {
+    throw new Error('AI 响应解析失败')
+  }
+
+  return value
+}
+
+function readOptionalString(payload: Record<string, unknown>, key: string) {
+  const value = payload[key]
+  return typeof value === 'string' ? value : ''
+}
+
+export async function streamAiChat(options: AiChatStreamOptions) {
+  await apiStreamRequest('/api/front/ai/chat/stream', {
+    method: 'POST',
+    headers: {
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify({
+      message: options.message,
+      conversationId: options.conversationId,
+    }),
+    signal: options.signal,
+    async onEvent(event) {
+      if (event.event === 'token') {
+        await options.onToken(readRequiredString(parseAiStreamPayload(event), 'text'))
+        return
+      }
+
+      if (event.event === 'tool_start') {
+        await options.onToolStart?.(readOptionalString(parseAiStreamPayload(event), 'name'))
+        return
+      }
+
+      if (event.event === 'tool_end') {
+        await options.onToolEnd?.(readOptionalString(parseAiStreamPayload(event), 'name'))
+        return
+      }
+
+      if (event.event === 'error') {
+        const message = readOptionalString(parseAiStreamPayload(event), 'message')
+        await options.onError?.(message || 'AI 阅读助手返回错误')
+        return false
+      }
+
+      if (event.event === 'done') {
+        parseAiStreamPayload(event)
+        await options.onDone?.()
+        return false
+      }
+    },
+  })
 }
 
 function mapUserProfile(raw?: ApiUserInfo | null): UserProfileInfo {
@@ -823,17 +901,22 @@ export async function fetchBookComments(bookId: string): Promise<BookCommentResu
 
     return {
       total: toNumber(data?.commentTotal, comments.length),
-      comments: comments.map((comment) => ({
-        id: toText(comment.id, `${bookId}-comment`),
-        bookId,
-        userId: toText(comment.commentUserId, 'api-user'),
-        userName: stripHtml(comment.commentUser, '读者'),
-        userPhoto: resolveAssetUrl(comment.commentUserPhoto),
-        content: stripHtml(comment.commentContent, '这本书值得继续读下去。'),
-        createdAt: toText(comment.commentTime, '最近'),
-        replies: [],
-        source: 'api',
-      })),
+      comments: comments.map((comment) => {
+        const userId = toText(comment.commentUserId, 'api-user')
+        const userName = stripHtml(comment.commentUserNickName, '') || stripHtml(comment.commentUser, '读者')
+
+        return {
+          id: toText(comment.id, `${bookId}-comment`),
+          bookId,
+          userId,
+          userName,
+          userPhoto: resolveAssetUrl(comment.commentUserPhoto) || createDefaultUserAvatar(userId || userName).url,
+          content: stripHtml(comment.commentContent, '这本书值得继续读下去。'),
+          createdAt: toText(comment.commentTime, '最近'),
+          replies: [],
+          source: 'api',
+        }
+      }),
     }
   } catch {
     return { total: 0, comments: [] }

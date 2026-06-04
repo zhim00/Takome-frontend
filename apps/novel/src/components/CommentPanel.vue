@@ -17,7 +17,7 @@ const emit = defineEmits<{
   changed: []
 }>()
 
-const MAX_COMMENT_LENGTH = 240
+const MAX_COMMENT_LENGTH = 512
 
 const { user, isAuthenticated } = useAuth()
 
@@ -77,8 +77,8 @@ async function submitComment() {
 
   const content = draft.value.trim()
 
-  if (content.length < 6) {
-    message.value = '评论至少 6 个字'
+  if (content.length < 4) {
+    message.value = '评论至少 4 个字'
     return
   }
 
@@ -128,8 +128,8 @@ async function saveEdit(comment: BookComment) {
 
   const content = editDraft.value.trim()
 
-  if (content.length < 6) {
-    message.value = '评论至少 6 个字'
+  if (content.length < 4) {
+    message.value = '评论至少 4 个字'
     return
   }
 

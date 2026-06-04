@@ -1,7 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, shallowRef, useTemplateRef, watch } from 'vue'
+import {
+  computed,
+  defineComponent,
+  h,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  shallowRef,
+  useTemplateRef,
+  watch,
+} from 'vue'
+import type { PropType } from 'vue'
 
 import assistantIcon from '@/assets/ai_assistant.apng'
+import { streamAiChat } from '@/services/novelApi'
 
 interface PromptCard {
   title: string
@@ -15,6 +28,41 @@ interface ChatMessage {
   content: string
   kind?: 'loginRequired'
   pending?: boolean
+  status?: string
+}
+
+interface MarkdownInlineSegment {
+  kind: 'text' | 'strong' | 'code'
+  text: string
+}
+
+type MarkdownBlock =
+  | {
+      type: 'paragraph'
+      parts: MarkdownInlineSegment[]
+    }
+  | {
+      type: 'heading'
+      level: number
+      parts: MarkdownInlineSegment[]
+    }
+  | {
+      type: 'rule'
+    }
+  | {
+      type: 'list'
+      ordered: boolean
+      items: MarkdownInlineSegment[][]
+    }
+  | {
+      type: 'table'
+      headers: MarkdownInlineSegment[][]
+      rows: MarkdownInlineSegment[][][]
+    }
+
+interface RenderedChatMessage extends ChatMessage {
+  displayContent: string
+  markdownBlocks: MarkdownBlock[]
 }
 
 const props = defineProps<{
@@ -30,7 +78,7 @@ const promptCards: PromptCard[] = [
   {
     title: '查阅书架',
     description: '快速整理我的收藏、阅读进度和最近打开的作品。',
-    prompt: '请帮我查看书架，整理我正在阅读和已收藏的书籍。',
+    prompt: '请帮我查看书架，整理我最近正在阅读和已加入书架的书籍。',
   },
   {
     title: '书籍搜索',
@@ -49,13 +97,40 @@ const promptCards: PromptCard[] = [
   },
 ]
 
+const MarkdownInlineText = defineComponent({
+  props: {
+    parts: {
+      type: Array as PropType<MarkdownInlineSegment[]>,
+      required: true,
+    },
+  },
+  setup(props) {
+    return () =>
+      props.parts.map((part, index) => {
+        if (part.kind === 'strong') {
+          return h('strong', { key: index }, part.text)
+        }
+
+        if (part.kind === 'code') {
+          return h('code', { key: index }, part.text)
+        }
+
+        return h('span', { key: index }, part.text)
+      })
+  },
+})
+
 const CAROUSEL_INTERVAL_MS = 4400
 const CAROUSEL_FALLBACK_MS = 760
 const HERO_ICON_COMBO_RESET_MS = 1200
 const HERO_ICON_TAP_ANIMATION_MS = 360
+const MAX_DRAFT_LENGTH = 1000
+const INPUT_LIMIT_MESSAGE_MS = 1800
 
 const messages = shallowRef<ChatMessage[]>([])
 const draft = shallowRef('')
+const inputLimitMessage = shallowRef('')
+const isStreaming = shallowRef(false)
 const isFloating = shallowRef(false)
 const copiedMessageId = shallowRef<number | null>(null)
 const activeCardIndex = shallowRef(promptCards.length)
@@ -76,28 +151,42 @@ const floatingPosition = reactive({
   x: 0,
   y: 96,
 })
+const conversationId = shallowRef(createConversationId())
 
 let messageId = 0
+let activeStreamController: AbortController | null = null
+let activeStreamMessageId: number | null = null
 let carouselTimer: number | undefined
 let carouselFallbackTimer: number | undefined
 let heroIconComboTimer: number | undefined
 let heroIconTapAnimationTimer: number | undefined
 let heroIconAnimationFrame: number | undefined
+let inputLimitMessageTimer: number | undefined
 let isCarouselAnimating = false
+let isComponentAlive = true
 let queuedCarouselSteps = 0
-let dragStart:
-  | {
-      pointerId: number
-      originX: number
-      originY: number
-      panelX: number
-      panelY: number
-    }
-  | null = null
+let dragStart: {
+  pointerId: number
+  originX: number
+  originY: number
+  panelX: number
+  panelY: number
+} | null = null
 
 const hasConversation = computed(() => messages.value.length > 0)
+const hasAssistantConversation = computed(() =>
+  messages.value.some(
+    (message) => message.role === 'assistant' && message.kind !== 'loginRequired',
+  ),
+)
+const canCreateConversation = computed(
+  () => props.isAuthenticated && hasAssistantConversation.value && !isStreaming.value,
+)
+const draftCharacterCount = computed(() => draft.value.length)
 const dockStateLabel = computed(() => (isFloating.value ? '窗口吸附' : '窗口浮动'))
-const dockStateTitle = computed(() => (isFloating.value ? '吸附到右侧边栏' : '切换为可拖动浮动窗口'))
+const dockStateTitle = computed(() =>
+  isFloating.value ? '吸附到右侧边栏' : '切换为可拖动浮动窗口',
+)
 const heroIconLabel = computed(() =>
   heroIconTapCount.value > 0
     ? `阅读助手图标，已连续点击 ${heroIconTapCount.value} 次`
@@ -128,8 +217,26 @@ const panelStyle = computed(() => {
     top: `${floatingPosition.y}px`,
   }
 })
+const renderedMessages = computed<RenderedChatMessage[]>(() =>
+  messages.value.map((message) => {
+    const displayContent = message.content || message.status || ''
 
-function createMessage(role: ChatMessage['role'], content: string, options: Partial<ChatMessage> = {}) {
+    return {
+      ...message,
+      displayContent,
+      markdownBlocks:
+        message.role === 'assistant' && message.kind !== 'loginRequired'
+          ? parseAssistantMarkdown(displayContent)
+          : [],
+    }
+  }),
+)
+
+function createMessage(
+  role: ChatMessage['role'],
+  content: string,
+  options: Partial<ChatMessage> = {},
+) {
   messageId += 1
 
   return {
@@ -138,6 +245,331 @@ function createMessage(role: ChatMessage['role'], content: string, options: Part
     content,
     ...options,
   }
+}
+
+function parseInlineMarkdown(text: string): MarkdownInlineSegment[] {
+  const parts: MarkdownInlineSegment[] = []
+  const pattern = /(\*\*[^*]+?\*\*|`[^`]+?`)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({
+        kind: 'text',
+        text: text.slice(lastIndex, match.index),
+      })
+    }
+
+    const raw = match[0]
+
+    if (raw.startsWith('**')) {
+      parts.push({
+        kind: 'strong',
+        text: raw.slice(2, -2).trim(),
+      })
+    } else {
+      parts.push({
+        kind: 'code',
+        text: raw.slice(1, -1),
+      })
+    }
+
+    lastIndex = match.index + raw.length
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({
+      kind: 'text',
+      text: text.slice(lastIndex),
+    })
+  }
+
+  return parts.length > 0 ? parts : [{ kind: 'text', text }]
+}
+
+function splitTableRow(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+function isTableRow(line: string) {
+  const trimmed = line.trim()
+  return trimmed.startsWith('|') && trimmed.endsWith('|') && splitTableRow(trimmed).length > 1
+}
+
+function isTableDivider(line: string) {
+  return (
+    isTableRow(line) &&
+    splitTableRow(line).every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s/g, '')))
+  )
+}
+
+function parseListLine(line: string) {
+  const trimmed = line.trim()
+  const unordered = trimmed.match(/^[-*+]\s+(.+)$/)
+
+  if (unordered?.[1]) {
+    return {
+      ordered: false,
+      text: unordered[1],
+    }
+  }
+
+  const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/)
+
+  if (ordered?.[1]) {
+    return {
+      ordered: true,
+      text: ordered[1],
+    }
+  }
+
+  return null
+}
+
+function isBlockStart(line: string) {
+  const trimmed = line.trim()
+
+  return (
+    !trimmed ||
+    /^#{1,4}\s+/.test(trimmed) ||
+    /^-{3,}$/.test(trimmed) ||
+    isTableRow(trimmed) ||
+    parseListLine(trimmed) !== null
+  )
+}
+
+function normalizeTableRow(cells: string[], size: number) {
+  return Array.from({ length: size }, (_, index) => cells[index] ?? '')
+}
+
+function parseAssistantMarkdown(content: string): MarkdownBlock[] {
+  const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  const blocks: MarkdownBlock[] = []
+  let index = 0
+
+  while (index < lines.length) {
+    const line = lines[index] ?? ''
+    const trimmed = line.trim()
+
+    if (!trimmed) {
+      index += 1
+      continue
+    }
+
+    if (/^-{3,}$/.test(trimmed)) {
+      blocks.push({ type: 'rule' })
+      index += 1
+      continue
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/)
+
+    if (heading?.[2]) {
+      blocks.push({
+        type: 'heading',
+        level: heading[1]?.length ?? 2,
+        parts: parseInlineMarkdown(heading[2]),
+      })
+      index += 1
+      continue
+    }
+
+    if (isTableRow(trimmed)) {
+      const headers = splitTableRow(trimmed)
+      let rowIndex = index + 1
+
+      if (isTableDivider(lines[rowIndex] ?? '')) {
+        rowIndex += 1
+      }
+
+      const rows: string[][] = []
+
+      while (rowIndex < lines.length && isTableRow(lines[rowIndex] ?? '')) {
+        const row = lines[rowIndex] ?? ''
+
+        if (!isTableDivider(row)) {
+          rows.push(splitTableRow(row))
+        }
+
+        rowIndex += 1
+      }
+
+      blocks.push({
+        type: 'table',
+        headers: headers.map(parseInlineMarkdown),
+        rows: rows.map((row) => normalizeTableRow(row, headers.length).map(parseInlineMarkdown)),
+      })
+      index = rowIndex
+      continue
+    }
+
+    const listLine = parseListLine(trimmed)
+
+    if (listLine) {
+      const items: MarkdownInlineSegment[][] = []
+      const ordered = listLine.ordered
+
+      while (index < lines.length) {
+        const current = parseListLine(lines[index] ?? '')
+
+        if (!current || current.ordered !== ordered) {
+          break
+        }
+
+        items.push(parseInlineMarkdown(current.text))
+        index += 1
+      }
+
+      blocks.push({
+        type: 'list',
+        ordered,
+        items,
+      })
+      continue
+    }
+
+    const paragraphLines: string[] = []
+
+    while (index < lines.length && !isBlockStart(lines[index] ?? '')) {
+      const paragraphLine = (lines[index] ?? '').trim()
+
+      if (paragraphLine) {
+        paragraphLines.push(paragraphLine)
+      }
+
+      index += 1
+    }
+
+    if (paragraphLines.length > 0) {
+      blocks.push({
+        type: 'paragraph',
+        parts: parseInlineMarkdown(paragraphLines.join(' ')),
+      })
+      continue
+    }
+
+    index += 1
+  }
+
+  return blocks
+}
+
+function createConversationId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function canUpdateStreamMessage(messageIdToCheck: number) {
+  return isComponentAlive && activeStreamMessageId === messageIdToCheck
+}
+
+function patchMessage(messageIdToPatch: number, updater: (message: ChatMessage) => ChatMessage) {
+  if (!isComponentAlive) {
+    return
+  }
+
+  messages.value = messages.value.map((message) =>
+    message.id === messageIdToPatch ? updater(message) : message,
+  )
+}
+
+function updateAssistantStatus(messageIdToUpdate: number, status: string) {
+  if (!canUpdateStreamMessage(messageIdToUpdate)) {
+    return
+  }
+
+  patchMessage(messageIdToUpdate, (message) => ({
+    ...message,
+    status: message.content ? message.status : status,
+  }))
+}
+
+function appendAssistantContent(messageIdToUpdate: number, text: string) {
+  if (!text || !canUpdateStreamMessage(messageIdToUpdate)) {
+    return
+  }
+
+  patchMessage(messageIdToUpdate, (message) => ({
+    ...message,
+    content: `${message.content}${text}`,
+    status: undefined,
+  }))
+  void scrollMessagesToBottom()
+}
+
+function settleAssistantMessage(messageIdToUpdate: number) {
+  if (!canUpdateStreamMessage(messageIdToUpdate)) {
+    return
+  }
+
+  patchMessage(messageIdToUpdate, (message) => ({
+    ...message,
+    pending: false,
+    status: undefined,
+  }))
+}
+
+function showAssistantError(messageIdToUpdate: number, message: string) {
+  if (!canUpdateStreamMessage(messageIdToUpdate)) {
+    return
+  }
+
+  const errorText = message.trim() || 'AI 阅读助手暂时无法回复，请稍后再试。'
+
+  patchMessage(messageIdToUpdate, (currentMessage) => ({
+    ...currentMessage,
+    content: currentMessage.content ? `${currentMessage.content}\n\n${errorText}` : errorText,
+    pending: false,
+    status: undefined,
+  }))
+  void scrollMessagesToBottom()
+}
+
+function abortCurrentStream() {
+  activeStreamController?.abort()
+  activeStreamController = null
+  activeStreamMessageId = null
+
+  if (isComponentAlive) {
+    isStreaming.value = false
+  }
+}
+
+function startNewConversation() {
+  if (!canCreateConversation.value) {
+    return
+  }
+
+  abortCurrentStream()
+  messages.value = []
+  copiedMessageId.value = null
+  pendingUnauthenticatedMessage.value = null
+  shouldReplayPendingAfterLogin.value = false
+  draft.value = ''
+  inputLimitMessage.value = ''
+  conversationId.value = createConversationId()
+  void nextTick().then(syncInputHeight)
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function getAssistantErrorText(error: unknown) {
+  if (error instanceof Error && error.message === 'AI 响应解析失败') {
+    return 'AI 响应解析失败，请稍后再试。'
+  }
+
+  return 'AI 阅读助手暂时无法回复，请稍后再试。'
 }
 
 function toggleFloatMode() {
@@ -150,7 +582,11 @@ function toggleFloatMode() {
   const width = rect?.width ?? 380
   const height = rect?.height ?? 620
 
-  floatingPosition.x = clamp(rect?.left ?? window.innerWidth - width - 24, 12, window.innerWidth - width - 12)
+  floatingPosition.x = clamp(
+    rect?.left ?? window.innerWidth - width - 24,
+    12,
+    window.innerWidth - width - 12,
+  )
   floatingPosition.y = clamp(rect?.top ?? 96, 12, window.innerHeight - height - 12)
   isFloating.value = true
 }
@@ -302,23 +738,29 @@ function appendUserMessage(content: string) {
 }
 
 async function submitCardPrompt(card: PromptCard) {
-  await submitMessage(card.prompt)
+  await sendMessage(card.prompt)
 }
 
 async function submitDraft() {
   const content = draft.value.trim()
 
-  if (!content) {
+  if (!content || isStreaming.value) {
     return
   }
 
   draft.value = ''
   await nextTick()
   syncInputHeight()
-  await submitMessage(content)
+  await sendMessage(content)
 }
 
-async function submitMessage(content: string) {
+async function sendMessage(promptText: string) {
+  const content = promptText.trim()
+
+  if (!content || isStreaming.value) {
+    return
+  }
+
   appendUserMessage(content)
   await scrollMessagesToBottom()
 
@@ -333,22 +775,63 @@ async function submitMessage(content: string) {
   await streamAssistantReply(content)
 }
 
-async function streamAssistantReply(_content: string) {
-  const reply = createMessage('assistant', '后端 AI 聊天接口尚未接入，接口确定后这里会展示服务端返回的流式消息。', {
-    pending: true,
-  })
+async function streamAssistantReply(content: string) {
+  abortCurrentStream()
 
+  const controller = new AbortController()
+  const reply = createMessage('assistant', '', {
+    pending: true,
+    status: '正在思考…',
+  })
+  let hasTerminalEvent = false
+
+  activeStreamController = controller
+  activeStreamMessageId = reply.id
+  isStreaming.value = true
   messages.value = [...messages.value, reply]
   await scrollMessagesToBottom()
 
-  messages.value = messages.value.map((message) =>
-    message.id === reply.id
-      ? {
-          ...message,
-          pending: false,
-        }
-      : message,
-  )
+  try {
+    await streamAiChat({
+      message: content,
+      conversationId: conversationId.value,
+      signal: controller.signal,
+      onToken(text) {
+        appendAssistantContent(reply.id, text)
+      },
+      onToolStart() {
+        updateAssistantStatus(reply.id, '正在查询…')
+      },
+      onToolEnd() {
+        updateAssistantStatus(reply.id, '正在整理…')
+      },
+      onError(message) {
+        hasTerminalEvent = true
+        showAssistantError(reply.id, message)
+      },
+      onDone() {
+        hasTerminalEvent = true
+        settleAssistantMessage(reply.id)
+      },
+    })
+
+    if (!hasTerminalEvent) {
+      settleAssistantMessage(reply.id)
+    }
+  } catch (error) {
+    if (!isAbortError(error)) {
+      showAssistantError(reply.id, getAssistantErrorText(error))
+    }
+  } finally {
+    if (activeStreamMessageId === reply.id) {
+      activeStreamController = null
+      activeStreamMessageId = null
+
+      if (isComponentAlive) {
+        isStreaming.value = false
+      }
+    }
+  }
 }
 
 async function scrollMessagesToBottom() {
@@ -415,6 +898,93 @@ function moveLoginGlow(event: PointerEvent) {
 
   target.style.setProperty('--login-glow-x', `${event.clientX - rect.left}px`)
   target.style.setProperty('--login-glow-y', `${event.clientY - rect.top}px`)
+}
+
+function showInputLimitMessage() {
+  inputLimitMessage.value = `最多输入 ${MAX_DRAFT_LENGTH} 个字符`
+  window.clearTimeout(inputLimitMessageTimer)
+  inputLimitMessageTimer = window.setTimeout(() => {
+    inputLimitMessage.value = ''
+  }, INPUT_LIMIT_MESSAGE_MS)
+}
+
+function getInputSelection() {
+  const input = inputRef.value
+  const start = input?.selectionStart ?? draft.value.length
+  const end = input?.selectionEnd ?? start
+
+  return {
+    start,
+    end,
+    selectedLength: Math.max(0, end - start),
+  }
+}
+
+function wouldExceedDraftLimit(incomingLength: number) {
+  const { selectedLength } = getInputSelection()
+  return draft.value.length - selectedLength + incomingLength > MAX_DRAFT_LENGTH
+}
+
+function handleDraftBeforeInput(event: InputEvent) {
+  if (!event.inputType.startsWith('insert')) {
+    return
+  }
+
+  const incomingLength = event.inputType === 'insertLineBreak' ? 1 : event.data?.length
+
+  if (incomingLength === undefined) {
+    return
+  }
+
+  if (wouldExceedDraftLimit(incomingLength)) {
+    event.preventDefault()
+    showInputLimitMessage()
+  }
+}
+
+function handleDraftPaste(event: ClipboardEvent) {
+  const pastedText = event.clipboardData?.getData('text') ?? ''
+
+  if (!pastedText) {
+    return
+  }
+
+  const { start, end, selectedLength } = getInputSelection()
+  const availableLength = MAX_DRAFT_LENGTH - (draft.value.length - selectedLength)
+
+  if (pastedText.length <= availableLength) {
+    return
+  }
+
+  event.preventDefault()
+
+  if (availableLength > 0) {
+    const acceptedText = pastedText.slice(0, availableLength)
+    const nextCursorPosition = start + acceptedText.length
+    draft.value = `${draft.value.slice(0, start)}${acceptedText}${draft.value.slice(end)}`
+
+    void nextTick().then(() => {
+      syncInputHeight()
+      inputRef.value?.setSelectionRange(nextCursorPosition, nextCursorPosition)
+    })
+  }
+
+  showInputLimitMessage()
+}
+
+function handleDraftInput(event: Event) {
+  const input = event.target as HTMLTextAreaElement | null
+
+  if (input && input.value.length > MAX_DRAFT_LENGTH) {
+    input.value = input.value.slice(0, MAX_DRAFT_LENGTH)
+    draft.value = input.value
+    showInputLimitMessage()
+  } else if (draft.value.length > MAX_DRAFT_LENGTH) {
+    draft.value = draft.value.slice(0, MAX_DRAFT_LENGTH)
+    showInputLimitMessage()
+  }
+
+  syncInputHeight()
 }
 
 function syncInputHeight() {
@@ -485,12 +1055,15 @@ watch(
     copiedMessageId.value = null
 
     if (messageToReplay) {
-      void nextTick().then(() => submitMessage(messageToReplay))
+      void nextTick().then(() => sendMessage(messageToReplay))
     }
   },
 )
 
 onBeforeUnmount(() => {
+  isComponentAlive = false
+  abortCurrentStream()
+
   if (carouselTimer) {
     window.clearInterval(carouselTimer)
   }
@@ -498,6 +1071,7 @@ onBeforeUnmount(() => {
   window.clearTimeout(carouselFallbackTimer)
   window.clearTimeout(heroIconComboTimer)
   window.clearTimeout(heroIconTapAnimationTimer)
+  window.clearTimeout(inputLimitMessageTimer)
   if (heroIconAnimationFrame !== undefined) {
     window.cancelAnimationFrame(heroIconAnimationFrame)
     heroIconAnimationFrame = undefined
@@ -528,6 +1102,28 @@ onBeforeUnmount(() => {
         <button
           class="assistant-icon-button"
           type="button"
+          aria-label="新建会话"
+          data-tooltip="新建会话"
+          :title="canCreateConversation ? '新建会话' : ''"
+          :disabled="!canCreateConversation"
+          @click="startNewConversation"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+          >
+            <path
+              d="M8 0.599609C3.91309 0.599609 0.599609 3.91309 0.599609 8C0.599609 9.13376 0.855461 10.2098 1.3125 11.1719L1.5918 11.7588L2.76562 11.2012L2.48633 10.6143C2.11034 9.82278 1.90039 8.93675 1.90039 8C1.90039 4.63106 4.63106 1.90039 8 1.90039C11.3689 1.90039 14.0996 4.63106 14.0996 8C14.0996 11.3689 11.3689 14.0996 8 14.0996C7.31041 14.0996 6.80528 14.0514 6.35742 13.9277C5.91623 13.8059 5.49768 13.6021 4.99707 13.2529C4.26492 12.7422 3.21611 12.5616 2.35156 13.1074L2.33789 13.1162L2.32422 13.126L1.58789 13.6436L2.01953 14.9297L3.0459 14.207C3.36351 14.0065 3.83838 14.0294 4.25293 14.3184C4.84547 14.7317 5.39743 15.011 6.01172 15.1807C6.61947 15.3485 7.25549 15.4004 8 15.4004C12.0869 15.4004 15.4004 12.0869 15.4004 8C15.4004 3.91309 12.0869 0.599609 8 0.599609ZM7.34473 4.93945V7.34961H4.93945V8.65039H7.34473V11.0605H8.64551V8.65039H11.0605V7.34961H8.64551V4.93945H7.34473Z"
+              fill="currentColor"
+            ></path>
+          </svg>
+        </button>
+        <button
+          class="assistant-icon-button"
+          type="button"
           :aria-label="dockStateLabel"
           :data-tooltip="dockStateLabel"
           :title="dockStateTitle"
@@ -537,7 +1133,12 @@ onBeforeUnmount(() => {
             <path d="M6 6h12v12H6zM9 3h12v12" fill="none" stroke="currentColor" stroke-width="2" />
           </svg>
           <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M8 4h12v12H8zM4 8h12v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+            <path
+              d="M8 4h12v12H8zM4 8h12v12H4z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            />
           </svg>
         </button>
         <button
@@ -565,7 +1166,11 @@ onBeforeUnmount(() => {
             :aria-label="heroIconLabel"
             @click="tapHeroIcon"
           >
-            <span :key="heroIconEffectKey" class="assistant-hero-icon-pulse" aria-hidden="true"></span>
+            <span
+              :key="heroIconEffectKey"
+              class="assistant-hero-icon-pulse"
+              aria-hidden="true"
+            ></span>
             <img class="assistant-hero-icon" :src="assistantIcon" alt="" />
             <span v-if="heroIconTapCount > 0" class="assistant-hero-icon-count" aria-live="polite">
               ×{{ heroIconTapCount }}
@@ -600,6 +1205,7 @@ onBeforeUnmount(() => {
                 :key="`${card.title}-${index}`"
                 class="assistant-card"
                 type="button"
+                :disabled="isStreaming"
                 :style="carouselCardStyle"
                 @click="submitCardPrompt(card)"
               >
@@ -617,12 +1223,22 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="assistant-carousel-actions">
-            <button class="assistant-round-button" type="button" aria-label="上一组" @click="scrollCards(-1)">
+            <button
+              class="assistant-round-button"
+              type="button"
+              aria-label="上一组"
+              @click="scrollCards(-1)"
+            >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="m15 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" />
               </svg>
             </button>
-            <button class="assistant-round-button" type="button" aria-label="下一组" @click="scrollCards(1)">
+            <button
+              class="assistant-round-button"
+              type="button"
+              aria-label="下一组"
+              @click="scrollCards(1)"
+            >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" />
               </svg>
@@ -633,19 +1249,81 @@ onBeforeUnmount(() => {
 
       <section ref="messages" class="assistant-messages" aria-live="polite">
         <article
-          v-for="message in messages"
+          v-for="message in renderedMessages"
           :key="message.id"
           class="assistant-message"
-          :class="[`assistant-message-${message.role}`, { 'assistant-message-pending': message.pending }]"
+          :class="[
+            `assistant-message-${message.role}`,
+            { 'assistant-message-pending': message.pending },
+          ]"
         >
           <div class="assistant-message-bubble">
             <template v-if="message.kind === 'loginRequired'">
               <span>该功能需要登录后才能使用，请先</span>
-              <button class="assistant-inline-login" type="button" @click="openLoginFromReminder">登录</button>
+              <button class="assistant-inline-login" type="button" @click="openLoginFromReminder">
+                登录
+              </button>
               <span>。</span>
             </template>
+            <template v-else-if="message.role === 'assistant'">
+              <div class="assistant-markdown">
+                <template v-for="(block, blockIndex) in message.markdownBlocks" :key="blockIndex">
+                  <component
+                    :is="block.level <= 2 ? 'h3' : 'h4'"
+                    v-if="block.type === 'heading'"
+                    class="assistant-markdown-heading"
+                  >
+                    <MarkdownInlineText :parts="block.parts" />
+                  </component>
+
+                  <p v-else-if="block.type === 'paragraph'" class="assistant-markdown-paragraph">
+                    <MarkdownInlineText :parts="block.parts" />
+                  </p>
+
+                  <hr v-else-if="block.type === 'rule'" class="assistant-markdown-rule" />
+
+                  <ol
+                    v-else-if="block.type === 'list' && block.ordered"
+                    class="assistant-markdown-list"
+                  >
+                    <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
+                      <MarkdownInlineText :parts="item" />
+                    </li>
+                  </ol>
+
+                  <ul v-else-if="block.type === 'list'" class="assistant-markdown-list">
+                    <li v-for="(item, itemIndex) in block.items" :key="itemIndex">
+                      <MarkdownInlineText :parts="item" />
+                    </li>
+                  </ul>
+
+                  <div v-else-if="block.type === 'table'" class="assistant-markdown-table-wrap">
+                    <table class="assistant-markdown-table">
+                      <thead>
+                        <tr>
+                          <th
+                            v-for="(header, headerIndex) in block.headers"
+                            :key="headerIndex"
+                            scope="col"
+                          >
+                            <MarkdownInlineText :parts="header" />
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(row, rowIndex) in block.rows" :key="rowIndex">
+                          <td v-for="(cell, cellIndex) in row" :key="cellIndex">
+                            <MarkdownInlineText :parts="cell" />
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </template>
+              </div>
+            </template>
             <template v-else>
-              {{ message.content }}
+              {{ message.displayContent }}
             </template>
           </div>
           <button
@@ -676,24 +1354,51 @@ onBeforeUnmount(() => {
       <div class="assistant-input-shell">
         <div class="assistant-input-box">
           <div class="assistant-input-editor">
-            <div v-if="!draft" class="assistant-placeholder">输入书名、作者，或直接对我说…… (Shift + Enter 换行)</div>
+            <div v-if="!draft" class="assistant-placeholder">
+              输入书名、作者，或直接对我说…… (Shift + Enter 换行)
+            </div>
             <textarea
               ref="input"
               v-model="draft"
               class="assistant-input"
+              :disabled="isStreaming"
+              :maxlength="MAX_DRAFT_LENGTH"
               rows="1"
-              @input="syncInputHeight"
+              @beforeinput="handleDraftBeforeInput"
+              @input="handleDraftInput"
               @keydown.enter.exact.prevent="submitDraft"
+              @paste="handleDraftPaste"
             ></textarea>
           </div>
           <div class="assistant-input-actions">
-            <button class="assistant-send-button" type="submit" aria-label="发送消息" :disabled="!draft.trim()">
+            <span
+              class="assistant-input-count"
+              :class="{ 'assistant-input-count-full': draftCharacterCount >= MAX_DRAFT_LENGTH }"
+            >
+              {{ draftCharacterCount }}/{{ MAX_DRAFT_LENGTH }}
+            </span>
+            <button
+              class="assistant-send-button"
+              type="submit"
+              aria-label="发送消息"
+              :disabled="isStreaming || !draft.trim()"
+            >
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 19V5m0 0-6 6m6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" />
+                <path
+                  d="M12 19V5m0 0-6 6m6-6 6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
               </svg>
             </button>
           </div>
         </div>
+        <Transition name="assistant-input-limit-pop">
+          <p v-if="inputLimitMessage" class="assistant-input-limit-message" role="alert">
+            {{ inputLimitMessage }}
+          </p>
+        </Transition>
         <p class="assistant-ai-note">本回答由 AI 生成，内容仅供参考，请仔细甄别。</p>
       </div>
     </form>
@@ -805,6 +1510,16 @@ onBeforeUnmount(() => {
   color: var(--assistant-accent);
 }
 
+.assistant-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.assistant-icon-button:disabled:hover {
+  background: transparent;
+  color: var(--assistant-muted);
+}
+
 .assistant-icon-button:focus-visible,
 .assistant-round-button:focus-visible,
 .assistant-card:focus-visible,
@@ -890,8 +1605,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   background: transparent;
   cursor: pointer;
-  transition:
-    transform 180ms ease;
+  transition: transform 180ms ease;
 }
 
 .assistant-hero-icon-button:hover {
@@ -963,8 +1677,7 @@ onBeforeUnmount(() => {
 }
 
 .assistant-hero-icon-button:hover .assistant-hero-icon {
-  filter:
-    drop-shadow(0 10px 14px rgba(158, 70, 36, 0.16))
+  filter: drop-shadow(0 10px 14px rgba(158, 70, 36, 0.16))
     drop-shadow(0 0 10px rgba(255, 122, 78, 0.1));
   transform: translateY(-2px);
 }
@@ -1078,7 +1791,11 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 1px;
   border-radius: 7px;
-  background: radial-gradient(circle at var(--login-glow-x) var(--login-glow-y), rgba(255, 255, 255, 0.5), transparent 36px);
+  background: radial-gradient(
+    circle at var(--login-glow-x) var(--login-glow-y),
+    rgba(255, 255, 255, 0.5),
+    transparent 36px
+  );
   content: '';
   opacity: 0;
   transition: opacity 120ms ease;
@@ -1136,7 +1853,12 @@ onBeforeUnmount(() => {
   z-index: 1;
   width: min(72px, 18%);
   background:
-    linear-gradient(90deg, rgba(248, 250, 247, 0), rgba(248, 250, 247, 0.72) 58%, rgba(248, 250, 247, 0.98)),
+    linear-gradient(
+      90deg,
+      rgba(248, 250, 247, 0),
+      rgba(248, 250, 247, 0.72) 58%,
+      rgba(248, 250, 247, 0.98)
+    ),
     linear-gradient(90deg, rgba(77, 128, 255, 0), rgba(77, 128, 255, 0.08));
   content: '';
   pointer-events: none;
@@ -1165,6 +1887,11 @@ onBeforeUnmount(() => {
   padding: 0;
   background: var(--assistant-surface);
   text-align: left;
+}
+
+.assistant-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .assistant-card-panel {
@@ -1214,12 +1941,15 @@ onBeforeUnmount(() => {
     transform 160ms ease;
 }
 
-.assistant-card:has(.assistant-card-desc:hover, .assistant-card-head svg:hover) .assistant-card-desc {
+.assistant-card:has(.assistant-card-desc:hover, .assistant-card-head svg:hover)
+  .assistant-card-desc {
   color: #354138;
   transform: translateY(-1px);
 }
 
-.assistant-card:has(.assistant-card-desc:hover, .assistant-card-head svg:hover) .assistant-card-head svg {
+.assistant-card:has(.assistant-card-desc:hover, .assistant-card-head svg:hover)
+  .assistant-card-head
+  svg {
   background: var(--assistant-accent);
   color: #fff;
   transform: translateX(2px);
@@ -1280,6 +2010,7 @@ onBeforeUnmount(() => {
 
 .assistant-message-assistant {
   justify-self: start;
+  max-width: 94%;
 }
 
 .assistant-message-bubble {
@@ -1298,12 +2029,114 @@ onBeforeUnmount(() => {
 
 .assistant-message-assistant .assistant-message-bubble {
   border: 1px solid var(--assistant-line);
+  padding: 10px 12px;
   background: rgba(255, 255, 255, 0.9);
   color: var(--assistant-ink);
 }
 
 .assistant-message-pending .assistant-message-bubble {
   color: var(--assistant-muted);
+}
+
+.assistant-markdown {
+  display: grid;
+  gap: 10px;
+  white-space: normal;
+}
+
+.assistant-markdown-heading,
+.assistant-markdown-paragraph {
+  margin: 0;
+}
+
+.assistant-markdown-heading {
+  color: var(--assistant-ink);
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.assistant-markdown-paragraph {
+  color: var(--assistant-ink);
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.assistant-markdown-rule {
+  width: 100%;
+  height: 1px;
+  margin: 1px 0;
+  border: 0;
+  background: var(--assistant-line);
+}
+
+.assistant-markdown-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--assistant-ink);
+  line-height: 1.6;
+}
+
+.assistant-markdown-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--assistant-line);
+  border-radius: 8px;
+  background: var(--assistant-surface);
+}
+
+.assistant-markdown-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.assistant-markdown-table th,
+.assistant-markdown-table td {
+  padding: 8px 9px;
+  border-right: 1px solid var(--assistant-line);
+  border-bottom: 1px solid var(--assistant-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.assistant-markdown-table th:last-child,
+.assistant-markdown-table td:last-child {
+  border-right: 0;
+}
+
+.assistant-markdown-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.assistant-markdown-table th {
+  background: var(--assistant-panel-muted);
+  color: #354138;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.assistant-markdown-table td {
+  color: var(--assistant-ink);
+}
+
+.assistant-markdown strong {
+  color: var(--assistant-ink);
+  font-weight: 900;
+}
+
+.assistant-markdown code {
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: rgba(27, 28, 28, 0.07);
+  color: var(--assistant-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92em;
 }
 
 .assistant-inline-login {
@@ -1356,6 +2189,7 @@ onBeforeUnmount(() => {
 }
 
 .assistant-input-shell {
+  position: relative;
   display: grid;
   gap: 7px;
 }
@@ -1409,6 +2243,11 @@ onBeforeUnmount(() => {
   scrollbar-width: thin;
 }
 
+.assistant-input:disabled {
+  cursor: not-allowed;
+  color: var(--assistant-muted);
+}
+
 .assistant-input::-webkit-scrollbar {
   width: 5px;
 }
@@ -1435,6 +2274,37 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
+.assistant-input-limit-message {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 2;
+  max-width: min(260px, 100%);
+  margin: 0;
+  border: 1px solid rgba(160, 70, 24, 0.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fffaf6;
+  box-shadow: 0 8px 14px rgba(27, 28, 28, 0.14);
+  color: #7d3412;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.assistant-input-limit-pop-enter-active,
+.assistant-input-limit-pop-leave-active {
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.assistant-input-limit-pop-enter-from,
+.assistant-input-limit-pop-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
 .assistant-send-button {
   display: grid;
   width: 34px;
@@ -1451,8 +2321,22 @@ onBeforeUnmount(() => {
 
 .assistant-input-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding-top: 2px;
+}
+
+.assistant-input-count {
+  color: var(--assistant-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.assistant-input-count-full {
+  color: #a04618;
+  font-weight: 900;
 }
 
 .assistant-send-button:hover:not(:disabled) {
@@ -1554,7 +2438,9 @@ onBeforeUnmount(() => {
   .assistant-login-button,
   .assistant-round-button,
   .assistant-send-button,
-  .assistant-copy-button {
+  .assistant-copy-button,
+  .assistant-input-limit-pop-enter-active,
+  .assistant-input-limit-pop-leave-active {
     transition: none;
   }
 
