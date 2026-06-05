@@ -8,6 +8,7 @@ import ReaderChapterNav from '@/components/reader/ReaderChapterNav.vue'
 import ReaderHeader from '@/components/reader/ReaderHeader.vue'
 import ReaderSideMenu from '@/components/reader/ReaderSideMenu.vue'
 import { useAuth } from '@/composables/useAuth'
+import { useDocumentTitle } from '@/composables/useDocumentTitle'
 import { getReaderSettings, setReaderSettings } from '@/services/storage'
 import {
   addBookToBookshelf,
@@ -45,6 +46,13 @@ const fontSizes = [16, 20, 24, 28, 32]
 const chapterId = computed(() => String(route.params.chapterId))
 const book = computed(() => content.value?.book)
 const chapter = computed(() => content.value?.chapter)
+const pageTitle = computed(() => {
+  if (book.value && chapter.value) {
+    return `${chapter.value.title} - ${book.value.title}`
+  }
+
+  return book.value?.title ?? '正在阅读'
+})
 const paragraphs = computed(() => content.value?.content.split('\n').filter((item) => item.trim()) ?? [])
 const isSaved = computed(() => {
   if (!book.value) {
@@ -170,6 +178,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', handleScroll)
   document.removeEventListener('copy', preventCopy)
 })
+
+useDocumentTitle(pageTitle)
 </script>
 
 <template>

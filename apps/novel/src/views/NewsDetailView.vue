@@ -2,6 +2,7 @@
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
+import { useDocumentTitle } from '@/composables/useDocumentTitle'
 import { fetchNewsDetail } from '@/services/novelApi'
 import { formatDateLabel } from '@/services/format'
 import type { NewsItem } from '@/services/types'
@@ -12,6 +13,7 @@ const loading = shallowRef(false)
 const error = shallowRef('')
 
 const newsId = computed(() => String(route.params.id))
+const pageTitle = computed(() => news.value?.title ?? '资讯详情')
 const contentParagraphs = computed(() => {
   const content = news.value?.content?.trim()
 
@@ -50,6 +52,8 @@ watch(newsId, () => {
 onMounted(() => {
   void loadNews()
 })
+
+useDocumentTitle(pageTitle)
 </script>
 
 <template>

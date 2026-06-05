@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, shallowRef, useTemplateRef, watch
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 import assistantIcon from '@/assets/ai_assistant.apng'
+import logo from '@/assets/logo.png'
 import LoginDialog from '@/components/LoginDialog.vue'
 import ReadingAssistantPanel from '@/components/ReadingAssistantPanel.vue'
 import { useAuth } from '@/composables/useAuth'
@@ -122,7 +123,7 @@ onBeforeUnmount(() => {
   <div class="app-shell paper-grain" :class="{ 'app-shell-reader': isReader }">
     <header v-if="!isReader" class="site-header">
       <RouterLink class="brand" :to="{ name: 'home' }">
-        <span class="brand-mark serif">T</span>
+        <img :src="logo" width="38" height="38" alt="logo" />
         <span class="brand-text">
           <strong class="serif">Takome 书屋</strong>
           <small>Digital Paper</small>
@@ -251,18 +252,6 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-}
-
-.brand-mark {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 6px;
-  background: var(--color-ink);
-  color: var(--color-paper);
-  font-size: 26px;
-  font-weight: 600;
 }
 
 .brand-text {

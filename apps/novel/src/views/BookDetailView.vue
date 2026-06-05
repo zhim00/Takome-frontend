@@ -6,6 +6,7 @@ import BookCover from '@/components/BookCover.vue'
 import ChapterDrawer from '@/components/ChapterDrawer.vue'
 import CommentPanel from '@/components/CommentPanel.vue'
 import { useAuth } from '@/composables/useAuth'
+import { useDocumentTitle } from '@/composables/useDocumentTitle'
 import {
   addBookToBookshelf,
   fetchBook,
@@ -38,6 +39,7 @@ const isSaved = shallowRef(false)
 const isCatalogOpen = shallowRef(false)
 
 const bookId = computed(() => String(route.params.id))
+const pageTitle = computed(() => book.value?.title ?? '作品详情')
 const firstChapter = computed(() => chapters.value[0])
 const previewChapters = computed(() => chapters.value.slice(0, 30))
 const authorAvatar = computed(() => {
@@ -147,6 +149,8 @@ watch(isAuthenticated, () => {
 onMounted(() => {
   void loadDetail()
 })
+
+useDocumentTitle(pageTitle)
 </script>
 
 <template>
