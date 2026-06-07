@@ -14,6 +14,7 @@ import {
 import type { PropType } from 'vue'
 
 import assistantIcon from '@/assets/ai_assistant.apng'
+import logo from '@/assets/logo.png'
 import { streamAiChat } from '@/services/novelApi'
 
 interface PromptCard {
@@ -1094,7 +1095,7 @@ onBeforeUnmount(() => {
   >
     <header class="assistant-header" @pointerdown="startDrag">
       <div class="assistant-title">
-        <span class="assistant-mark" aria-hidden="true">T</span>
+        <img :src="logo" width="28" height="28" alt="logo" />
         <strong>Takome 阅读助手</strong>
       </div>
 
@@ -1468,18 +1469,6 @@ onBeforeUnmount(() => {
   color: var(--assistant-ink);
   font-size: 15px;
   font-weight: 800;
-}
-
-.assistant-mark {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 6px;
-  background: var(--assistant-ink);
-  color: var(--assistant-surface);
-  font-family: Newsreader, Georgia, 'Times New Roman', serif;
-  font-size: 20px;
 }
 
 .assistant-menu {
