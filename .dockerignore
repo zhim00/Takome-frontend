@@ -1,0 +1,8 @@
+# 镜像只需要 apps/novel/dist 这一个目录，其余全部排除。
+# 用白名单而不是逐项忽略，避免以后新增目录、依赖时漏掉。
+#
+# 注意：dist 是构建产物且被 .gitignore 忽略，但它是本镜像唯一需要的内容，
+# 必须先在开发机执行 pnpm build:novel 生成，否则 docker build 会失败。
+
+*
+!apps/novel/dist
