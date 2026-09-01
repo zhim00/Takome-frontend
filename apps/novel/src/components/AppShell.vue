@@ -28,6 +28,9 @@ const navItems = [
 const dockItems = [
   { label: '阅读助手', icon: assistantIcon },
 ]
+// GitHub 仓库地址和标签
+const githubUrl = 'https://github.com/zhim00/Takome-frontend'
+const githubLabel = 'zhim00/Takome'
 
 const isReader = computed(() => route.name === 'reader')
 const avatarLabel = computed(() => user.value?.nickName?.slice(0, 1) || '读')
@@ -144,6 +147,22 @@ onBeforeUnmount(() => {
       </nav>
 
       <div class="site-actions">
+        <a
+          class="site-github"
+          :href="githubUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          :aria-label="`打开 GitHub ：${githubLabel}`"
+        >
+          <span class="site-github-dot" aria-hidden="true"></span>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+            />
+          </svg>
+          <span class="site-github-label">{{ githubLabel }}</span>
+        </a>
+
         <form class="site-search" role="search" @submit.prevent="submitSearch">
           <input v-model="searchKeyword" type="search" placeholder="请输入书名或作者名" aria-label="搜索小说" />
           <button class="site-search-button" type="submit" aria-label="搜索">
@@ -301,6 +320,44 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: end;
   gap: 14px;
+}
+
+.site-github {
+  display: inline-flex;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(110, 122, 109, 0.28);
+  border-radius: 4px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.site-github:hover {
+  border-color: rgba(52, 168, 83, 0.45);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.site-github-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-primary-bright);
+  box-shadow: 0 0 5px rgba(52, 168, 83, 0.45);
+}
+
+.site-github svg {
+  flex: none;
 }
 
 .site-search {
@@ -501,6 +558,10 @@ onBeforeUnmount(() => {
   .site-search {
     flex: 1;
     grid-template-columns: minmax(0, 1fr) 38px;
+  }
+
+  .site-github-label {
+    display: none;
   }
 
   .site-footer-inner {
